@@ -401,6 +401,18 @@ def calculate_cpf_check_digit(digits: str) -> str:
     return "0" if remainder == 10 else str(remainder)
 
 
+def normalize_syncpay_phone(value: str) -> str:
+    digits = "".join(character for character in value if character.isdigit())
+    if len(digits) in {12, 13} and digits.startswith("55"):
+        digits = digits[2:]
+    return digits
+
+
+def syncpay_phone_valid(value: str) -> bool:
+    digits = normalize_syncpay_phone(value)
+    return len(digits) in {10, 11}
+
+
 def generate_syncpay_profile(user_id: int) -> tuple[str, str, str]:
     base_digits = f"{abs(user_id):09d}"[-9:]
     if len(set(base_digits)) == 1:
@@ -413,18 +425,20 @@ def generate_syncpay_profile(user_id: int) -> tuple[str, str, str]:
         + calculate_cpf_check_digit(base_digits + first_check_digit)
     )
     email = f"telegram-{abs(user_id)}@example.com"
-    telefone = f"55119{abs(user_id) % (10**8):08d}"
+    telefone = f"11{abs(user_id) % (10**9):09d}"
     return cpf, email, telefone
 
 
 def get_or_create_syncpay_profile(user_id: int, nome: str) -> tuple[str, str, str]:
     assinante = get_assinante(user_id)
     if syncpay_profile_complete(assinante):
-        return (
-            str(assinante["cpf"] or "").strip(),
-            str(assinante["email"] or "").strip(),
-            str(assinante["telefone"] or "").strip(),
-        )
+        stored_cpf = str(assinante["cpf"] or "").strip()
+        stored_email = str(assinante["email"] or "").strip()
+        stored_phone = normalize_syncpay_phone(str(assinante["telefone"] or "").strip())
+        if syncpay_phone_valid(stored_phone):
+            if stored_phone != str(assinante["telefone"] or "").strip():
+                save_payment_profile(user_id, nome, stored_cpf, stored_email, stored_phone)
+            return stored_cpf, stored_email, stored_phone
 
     cpf, email, telefone = generate_syncpay_profile(user_id)
     save_payment_profile(user_id, nome, cpf, email, telefone)
