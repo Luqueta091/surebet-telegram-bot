@@ -13,6 +13,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger("surebet-bot")
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 app = Flask(__name__)
 
@@ -214,8 +216,6 @@ def index() -> tuple[dict[str, Any], int]:
         {
             "service": "surebet-telegram-bot",
             "status": "ok",
-            "webhook_path": WEBHOOK_PATH,
-            "webhook_ready": bool(BOT_TOKEN and WEBHOOK_URL),
         },
         200,
     )
