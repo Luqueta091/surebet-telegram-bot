@@ -45,8 +45,8 @@ DATABASE_PATH = Path(
         str(Path(__file__).with_name("assinantes.db")),
     )
 ).expanduser()
-VIP_PRICE = 29.90
-VIP_PRICE_TEXT = "R$29,90"
+VIP_PRICE = 39.90
+VIP_PRICE_TEXT = "R$39,90"
 VIP_DURATION_DAYS = 30
 
 TELEGRAM_TOKEN = (
