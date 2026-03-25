@@ -157,6 +157,24 @@ def notification_webhook_url() -> str:
     return f"{WEBHOOK_URL.rstrip('/')}/webhook"
 
 
+def telegram_webhook_url() -> str:
+    if not WEBHOOK_URL:
+        return ""
+    normalized = WEBHOOK_URL.rstrip("/")
+    if normalized.endswith("/telegram-webhook"):
+        return normalized
+    if normalized.endswith("/webhook"):
+        normalized = normalized[: -len("/webhook")]
+    return f"{normalized}/telegram-webhook"
+
+
+def telegram_delivery_mode() -> str:
+    explicit_mode = os.environ.get("TELEGRAM_DELIVERY_MODE", "").strip().lower()
+    if explicit_mode in {"polling", "webhook"}:
+        return explicit_mode
+    return "webhook" if telegram_webhook_url() else "polling"
+
+
 def current_date() -> datetime.date:
     return datetime.now(APP_TIMEZONE).date()
 
@@ -980,12 +998,23 @@ async def telegram_bot_main() -> None:
     TELEGRAM_LOOP = asyncio.get_running_loop()
 
     await application.initialize()
-    if application.updater is None:
-        raise RuntimeError("Updater do Telegram não foi inicializado.")
-    await application.updater.start_polling(drop_pending_updates=False)
     await application.start()
+    if telegram_delivery_mode() == "webhook":
+        webhook_url = telegram_webhook_url()
+        if not webhook_url:
+            raise RuntimeError("WEBHOOK_URL não configurado para o webhook do Telegram.")
+        await application.bot.set_webhook(
+            url=webhook_url,
+            allowed_updates=Update.ALL_TYPES,
+        )
+        logger.info("Bot do Telegram iniciado com webhook em %s.", webhook_url)
+    else:
+        await application.bot.delete_webhook(drop_pending_updates=False)
+        if application.updater is None:
+            raise RuntimeError("Updater do Telegram não foi inicializado.")
+        await application.updater.start_polling(drop_pending_updates=False)
+        logger.info("Bot do Telegram iniciado com polling.")
     BOT_READY.set()
-    logger.info("Bot do Telegram iniciado com polling.")
 
     await asyncio.Event().wait()
 
@@ -1094,6 +1123,25 @@ def syncpay_webhook() -> tuple[dict[str, Any], int]:
         return {"status": "error"}, 500
 
     return {"status": "ok", "identifier": identifier}, 200
+
+
+@app.post("/telegram-webhook")
+def telegram_webhook() -> tuple[dict[str, Any], int]:
+    if TELEGRAM_APP is None:
+        return {"status": "error", "reason": "bot_not_initialized"}, 503
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return {"status": "ignored", "reason": "invalid_payload"}, 400
+
+    try:
+        update = Update.de_json(payload, TELEGRAM_APP.bot)
+        run_telegram_coroutine(TELEGRAM_APP.process_update(update))
+    except Exception as exc:
+        logger.exception("Falha ao processar update do Telegram: %s", exc)
+        return {"status": "error"}, 500
+
+    return {"status": "ok"}, 200
 
 
 ensure_services_started()
