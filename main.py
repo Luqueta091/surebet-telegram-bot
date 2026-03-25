@@ -51,13 +51,7 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
 
 START_TEXT = """Olá! Sou o assistente do grupo de Surebet 👋
 
-Escolha o que você quer aprender:
-
-📘 O que é Surebet?
-🧮 Como calcular?
-⚡ Como usar as entradas?
-💰 Qual banca usar?
-💳 Assinar VIP"""
+Use os botões abaixo para escolher o que você quer aprender."""
 
 SUREBET_TEXT = """📘 O QUE É SUREBET?
 
@@ -508,11 +502,31 @@ async def safe_answer_callback(query: Any, text: str | None = None) -> None:
         logger.warning("Falha ao responder callback query: %s", exc)
 
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat = update.effective_chat
     message = update.effective_message
-    if message is None:
+    if chat is None or message is None:
         return
-    await message.reply_text(START_TEXT, reply_markup=main_menu_keyboard())
+
+    menu_message_id = context.user_data.get("menu_message_id")
+    if menu_message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat.id,
+                message_id=menu_message_id,
+                text=START_TEXT,
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+        except TelegramError:
+            context.user_data.pop("menu_message_id", None)
+
+    menu_message = await message.reply_text(START_TEXT, reply_markup=main_menu_keyboard())
+    context.user_data["menu_message_id"] = menu_message.message_id
+
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await show_main_menu(update, context)
 
 
 async def handle_subscription_request(
@@ -592,10 +606,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if data == CALLBACK_MENU:
         await safe_answer_callback(query)
         try:
+            if query.message:
+                context.user_data["menu_message_id"] = query.message.message_id
             await query.edit_message_text(START_TEXT, reply_markup=main_menu_keyboard())
         except TelegramError:
             if query.message:
-                await query.message.reply_text(START_TEXT, reply_markup=main_menu_keyboard())
+                context.user_data.pop("menu_message_id", None)
+            await show_main_menu(update, context)
         return
 
     if data == CALLBACK_SUREBET:
