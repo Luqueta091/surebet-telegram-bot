@@ -490,12 +490,22 @@ async def present_callback_text(update: Update, text: str) -> None:
     query = update.callback_query
     if query is None:
         return
-    await query.answer()
+    await safe_answer_callback(query)
     try:
         await query.edit_message_text(text, reply_markup=back_to_menu_keyboard())
     except TelegramError:
         if query.message:
             await query.message.reply_text(text, reply_markup=back_to_menu_keyboard())
+
+
+async def safe_answer_callback(query: Any, text: str | None = None) -> None:
+    try:
+        if text is None:
+            await query.answer()
+        else:
+            await query.answer(text)
+    except TelegramError as exc:
+        logger.warning("Falha ao responder callback query: %s", exc)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -547,7 +557,7 @@ async def handle_subscription_request(
         return
 
     if via_callback and update.callback_query is not None:
-        await update.callback_query.answer()
+        await safe_answer_callback(update.callback_query)
         status_message = await message.reply_text("Gerando sua cobrança PIX...")
     else:
         status_message = await message.reply_text("Gerando sua cobrança PIX...")
@@ -580,7 +590,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     data = query.data
     if data == CALLBACK_MENU:
-        await query.answer()
+        await safe_answer_callback(query)
         try:
             await query.edit_message_text(START_TEXT, reply_markup=main_menu_keyboard())
         except TelegramError:
@@ -608,7 +618,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await handle_subscription_request(update, context, via_callback=True)
         return
 
-    await query.answer("Opção inválida.")
+    await safe_answer_callback(query, "Opção inválida.")
 
 
 async def telegram_bot_main() -> None:
