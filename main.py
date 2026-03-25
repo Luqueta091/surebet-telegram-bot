@@ -31,7 +31,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 APP_TIMEZONE = ZoneInfo(os.environ.get("APP_TIMEZONE", "America/Sao_Paulo"))
-DATABASE_PATH = Path(__file__).with_name("assinantes.db")
+DATABASE_PATH = Path(
+    os.environ.get(
+        "DATABASE_PATH",
+        str(Path(__file__).with_name("assinantes.db")),
+    )
+).expanduser()
 VIP_PRICE = 29.90
 VIP_PRICE_TEXT = "R$29,90"
 VIP_DURATION_DAYS = 30
@@ -171,6 +176,7 @@ def database_connection() -> sqlite3.Connection:
 
 
 def init_database() -> None:
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with database_connection() as connection:
         connection.execute(
             """
