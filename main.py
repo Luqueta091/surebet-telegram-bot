@@ -1127,7 +1127,7 @@ def syncpay_webhook() -> tuple[dict[str, Any], int]:
 
 @app.post("/telegram-webhook")
 def telegram_webhook() -> tuple[dict[str, Any], int]:
-    if TELEGRAM_APP is None:
+    if not BOT_READY.wait(timeout=25) or TELEGRAM_APP is None:
         return {"status": "error", "reason": "bot_not_initialized"}, 503
 
     payload = request.get_json(silent=True)
