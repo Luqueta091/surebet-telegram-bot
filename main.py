@@ -691,10 +691,29 @@ async def telegram_bot_main() -> None:
 
 
 def telegram_thread_target() -> None:
-    try:
-        asyncio.run(telegram_bot_main())
-    except Exception as exc:
-        logger.exception("Thread do Telegram finalizada com erro: %s", exc)
+    global TELEGRAM_APP, TELEGRAM_LOOP
+
+    retry_delay_seconds = 10
+    while True:
+        try:
+            asyncio.run(telegram_bot_main())
+            return
+        except Exception as exc:
+            BOT_READY.clear()
+            TELEGRAM_APP = None
+            TELEGRAM_LOOP = None
+
+            if exc.__class__.__name__ == "Conflict":
+                logger.warning(
+                    "Conflito no polling do Telegram durante a troca de instância. "
+                    "Nova tentativa em %s segundos.",
+                    retry_delay_seconds,
+                )
+                threading.Event().wait(retry_delay_seconds)
+                continue
+
+            logger.exception("Thread do Telegram finalizada com erro: %s", exc)
+            return
 
 
 def start_scheduler() -> None:
