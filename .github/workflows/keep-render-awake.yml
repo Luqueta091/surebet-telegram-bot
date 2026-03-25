@@ -2,14 +2,14 @@ name: Keep Render Awake
 
 on:
   schedule:
-    - cron: "7,17,27,37,47,57 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions: {}
 
 concurrency:
   group: keep-render-awake
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   ping:
