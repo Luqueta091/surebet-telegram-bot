@@ -597,6 +597,26 @@ async def assinar_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await handle_subscription_request(update, context, via_callback=False)
 
 
+async def group_service_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    chat = update.effective_chat
+    if message is None or chat is None:
+        return
+
+    if chat.type not in {"group", "supergroup"}:
+        return
+
+    try:
+        await message.delete()
+    except TelegramError as exc:
+        logger.warning(
+            "Não consegui apagar service message no chat %s (mensagem %s): %s",
+            chat.id,
+            message.message_id,
+            exc,
+        )
+
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if query is None:
@@ -649,6 +669,12 @@ async def telegram_bot_main() -> None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("assinar", assinar_command))
     application.add_handler(CallbackQueryHandler(callback_handler))
+    application.add_handler(
+        MessageHandler(
+            filters.StatusUpdate.NEW_CHAT_MEMBERS | filters.StatusUpdate.LEFT_CHAT_MEMBER,
+            group_service_message_handler,
+        )
+    )
 
     TELEGRAM_APP = application
     TELEGRAM_LOOP = asyncio.get_running_loop()
