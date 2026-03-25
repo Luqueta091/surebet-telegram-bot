@@ -1,62 +1,42 @@
 # Surebet Telegram Bot
 
-Bot do Telegram em Python com menu interativo para explicar surebets. A aplicação foi preparada para deploy no Render usando webhook HTTP.
+Bot completo para Telegram com:
 
-## Funcionalidades
+- `python-telegram-bot` v20+
+- explicações de Surebet via botões inline
+- assinatura VIP com PIX do Mercado Pago
+- webhook em Flask
+- remoção automática de acesso com APScheduler
+- persistência em SQLite
 
-- Menu `/start` com botões inline
-- Telas:
-  - `📘 O que é Surebet?`
-  - `🧮 Como calcular?`
-  - `⚡ Como usar as entradas?`
-  - `💰 Qual banca usar?`
-- Botão `🏢 Casas recomendadas` disponível na navegação
-- Endpoint `/health` para health check
-- Configuração automática do webhook quando `WEBHOOK_BASE_URL` estiver definido
+Toda a lógica principal está em `main.py`. O arquivo `app.py` existe apenas como ponte de compatibilidade para o start command atual do Render.
+
+## Variáveis de ambiente
+
+- `TELEGRAM_TOKEN`
+- `MP_ACCESS_TOKEN`
+- `GRUPO_VIP_ID`
+- `WEBHOOK_URL`
 
 ## Executar localmente
-
-1. Crie um ambiente virtual:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-2. Instale as dependências:
-
-```bash
 pip install -r requirements.txt
-```
-
-3. Configure as variáveis:
-
-```bash
 cp .env.example .env
-```
-
-4. Rode a aplicação:
-
-```bash
-python app.py
+python main.py
 ```
 
 ## Deploy no Render
 
 Use um **Web Service** com:
 
-- Runtime: `python`
 - Build command: `pip install -r requirements.txt`
 - Start command: `gunicorn --bind 0.0.0.0:$PORT app:app`
 
-Variáveis obrigatórias:
+## Observações
 
-- `TELEGRAM_BOT_TOKEN`
-- `WEBHOOK_SECRET`
-- `WEBHOOK_BASE_URL`
-
-Exemplo de webhook final:
-
-```text
-https://seu-servico.onrender.com/telegram/webhook/seu-segredo
-```
+- O bot precisa ser administrador do grupo VIP para criar links de convite e remover membros.
+- `WEBHOOK_URL` deve ser uma URL HTTPS pública, por exemplo `https://seu-bot.onrender.com`.
+- O endpoint de health check é `/health` e retorna `OK`.
