@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import secrets
 import sqlite3
 import threading
@@ -49,7 +48,6 @@ DATABASE_PATH = Path(
 VIP_PRICE = 29.90
 VIP_PRICE_TEXT = "R$29,90"
 VIP_DURATION_DAYS = 30
-EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 TELEGRAM_TOKEN = (
     os.environ.get("TELEGRAM_TOKEN", "").strip()
@@ -118,17 +116,6 @@ Casas recomendadas:
 - Betfair
 
 💡 Tenha pelo menos 3 casas cadastradas."""
-
-PROFILE_PROMPT_TEXT = """💳 ASSINAR VIP
-
-Antes de gerar seu PIX pela SyncPay, envie seus dados neste formato:
-
-CPF; email; telefone
-
-Exemplo:
-12345678900; nome@exemplo.com; 5511999999999
-
-Esses dados ficam salvos para as próximas renovações."""
 
 CALLBACK_SUREBET = "surebet_info"
 CALLBACK_CALC = "surebet_calc"
@@ -408,44 +395,40 @@ def syncpay_profile_complete(assinante: sqlite3.Row | None) -> bool:
     )
 
 
-def normalize_digits(value: str) -> str:
-    return re.sub(r"\D+", "", value)
+def calculate_cpf_check_digit(digits: str) -> str:
+    total = sum(int(digit) * multiplier for digit, multiplier in zip(digits, range(len(digits) + 1, 1, -1)))
+    remainder = (total * 10) % 11
+    return "0" if remainder == 10 else str(remainder)
 
 
-def normalize_cpf(value: str) -> str:
-    cpf = normalize_digits(value)
-    if len(cpf) != 11:
-        raise ValueError("CPF inválido. Envie exatamente 11 dígitos.")
-    return cpf
+def generate_syncpay_profile(user_id: int) -> tuple[str, str, str]:
+    base_digits = f"{abs(user_id):09d}"[-9:]
+    if len(set(base_digits)) == 1:
+        base_digits = "123456789"
+
+    first_check_digit = calculate_cpf_check_digit(base_digits)
+    cpf = (
+        base_digits
+        + first_check_digit
+        + calculate_cpf_check_digit(base_digits + first_check_digit)
+    )
+    email = f"telegram-{abs(user_id)}@example.com"
+    telefone = f"55119{abs(user_id) % (10**8):08d}"
+    return cpf, email, telefone
 
 
-def normalize_email(value: str) -> str:
-    email = value.strip().lower()
-    if not EMAIL_REGEX.fullmatch(email):
-        raise ValueError("E-mail inválido.")
-    return email
+def get_or_create_syncpay_profile(user_id: int, nome: str) -> tuple[str, str, str]:
+    assinante = get_assinante(user_id)
+    if syncpay_profile_complete(assinante):
+        return (
+            str(assinante["cpf"] or "").strip(),
+            str(assinante["email"] or "").strip(),
+            str(assinante["telefone"] or "").strip(),
+        )
 
-
-def normalize_phone(value: str) -> str:
-    phone = normalize_digits(value)
-    if len(phone) < 10 or len(phone) > 13:
-        raise ValueError("Telefone inválido. Envie DDD + número.")
-    return phone
-
-
-def parse_profile_input(text: str) -> tuple[str, str, str]:
-    if ";" in text:
-        parts = [part.strip() for part in text.split(";") if part.strip()]
-    else:
-        parts = [line.strip() for line in text.splitlines() if line.strip()]
-
-    if len(parts) != 3:
-        raise ValueError("Formato inválido. Use: CPF; email; telefone")
-
-    cpf = normalize_cpf(parts[0])
-    email = normalize_email(parts[1])
-    phone = normalize_phone(parts[2])
-    return cpf, email, phone
+    cpf, email, telefone = generate_syncpay_profile(user_id)
+    save_payment_profile(user_id, nome, cpf, email, telefone)
+    return cpf, email, telefone
 
 
 def missing_subscription_config() -> list[str]:
@@ -586,13 +569,12 @@ def fetch_syncpay_transaction(identifier: str) -> dict[str, Any]:
 def create_syncpay_charge(
     user_id: int,
     nome: str,
-    cpf: str,
-    email: str,
-    telefone: str,
 ) -> str:
     webhook_url = notification_webhook_url()
     if not webhook_url:
         raise RuntimeError("WEBHOOK_URL não configurado.")
+
+    cpf, email, telefone = get_or_create_syncpay_profile(user_id, nome)
 
     payload = {
         "amount": VIP_PRICE,
@@ -830,22 +812,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await show_main_menu(update, context)
 
 
-async def send_profile_prompt(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    *,
-    via_callback: bool,
-) -> None:
-    context.user_data["awaiting_syncpay_profile"] = True
-    message = update.effective_message
-    if message is None:
-        return
-    if via_callback:
-        await present_callback_text(update, PROFILE_PROMPT_TEXT)
-    else:
-        await message.reply_text(PROFILE_PROMPT_TEXT, reply_markup=back_to_menu_keyboard())
-
-
 async def handle_subscription_request(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -887,14 +853,6 @@ async def handle_subscription_request(
             await message.reply_text(config_text, reply_markup=back_to_menu_keyboard())
         return
 
-    if not syncpay_profile_complete(existing):
-        await send_profile_prompt(update, context, via_callback=via_callback)
-        return
-
-    cpf = str(existing["cpf"] or "").strip()
-    email = str(existing["email"] or "").strip()
-    telefone = str(existing["telefone"] or "").strip()
-
     if via_callback and update.callback_query is not None:
         await safe_answer_callback(update.callback_query)
         status_message = await message.reply_text("Gerando sua cobrança PIX...")
@@ -906,9 +864,6 @@ async def handle_subscription_request(
             create_syncpay_charge,
             user.id,
             user.full_name,
-            cpf,
-            email,
-            telefone,
         )
     except Exception as exc:
         logger.exception("Falha ao gerar cobrança PIX na SyncPay: %s", exc)
@@ -928,57 +883,6 @@ async def assinar_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await handle_subscription_request(update, context, via_callback=False)
 
 
-async def profile_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not context.user_data.get("awaiting_syncpay_profile"):
-        return
-
-    user = update.effective_user
-    message = update.effective_message
-    if user is None or message is None or not message.text:
-        return
-
-    try:
-        cpf, email, telefone = parse_profile_input(message.text)
-    except ValueError as exc:
-        await message.reply_text(
-            f"❌ {exc}\n\n{PROFILE_PROMPT_TEXT}",
-            reply_markup=back_to_menu_keyboard(),
-        )
-        return
-
-    context.user_data.pop("awaiting_syncpay_profile", None)
-    await asyncio.to_thread(
-        save_payment_profile,
-        user.id,
-        user.full_name,
-        cpf,
-        email,
-        telefone,
-    )
-
-    status_message = await message.reply_text("Dados recebidos. Gerando sua cobrança PIX...")
-
-    try:
-        payment_text = await asyncio.to_thread(
-            create_syncpay_charge,
-            user.id,
-            user.full_name,
-            cpf,
-            email,
-            telefone,
-        )
-    except Exception as exc:
-        logger.exception("Falha ao gerar cobrança PIX na SyncPay: %s", exc)
-        await status_message.edit_text(
-            "❌ Não consegui gerar sua cobrança PIX agora. Tente novamente em alguns instantes.",
-            reply_markup=back_to_menu_keyboard(),
-        )
-        return
-
-    await status_message.edit_text(
-        payment_text,
-        reply_markup=back_to_menu_keyboard(),
-    )
 async def group_service_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     chat = update.effective_chat
@@ -1057,7 +961,6 @@ async def telegram_bot_main() -> None:
             group_service_message_handler,
         )
     )
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, profile_message_handler))
 
     TELEGRAM_APP = application
     TELEGRAM_LOOP = asyncio.get_running_loop()

@@ -42,7 +42,7 @@ Use um **Web Service** com:
 ## Observações
 
 - O bot precisa ser administrador do grupo VIP para criar links de convite e remover membros.
-- Na primeira assinatura, o bot pede `CPF; email; telefone` para gerar o PIX da SyncPay.
+- O backend gera automaticamente `CPF`, `email` e `telefone` sintéticos para criar a cobrança PIX da SyncPay.
 - A SyncPay envia webhooks para `WEBHOOK_URL/webhook`; se você criar o webhook via painel/API deles, salve o token retornado em `SYNCPAY_WEBHOOK_TOKEN`.
 - `WEBHOOK_URL` deve ser uma URL HTTPS pública, por exemplo `https://seu-bot.onrender.com`.
 - Para não perder o SQLite em deploys do Render, aponte `DATABASE_PATH` para o disco persistente, por exemplo `/var/data/assinantes.db`.
