@@ -1087,6 +1087,11 @@ def ensure_services_started() -> None:
         SERVICES_STARTED = True
 
 
+@app.before_request
+def bootstrap_services() -> None:
+    ensure_services_started()
+
+
 @app.get("/")
 def index() -> tuple[dict[str, str], int]:
     return {"service": "surebet-telegram-bot", "status": "ok"}, 200
@@ -1143,11 +1148,8 @@ def telegram_webhook() -> tuple[dict[str, Any], int]:
 
     return {"status": "ok"}, 200
 
-
-ensure_services_started()
-
-
 if __name__ == "__main__":
+    ensure_services_started()
     app.run(
         host="0.0.0.0",
         port=int(os.environ.get("PORT", "10000")),
