@@ -3,22 +3,31 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+import secrets
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import mercadopago
+import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from flask import Flask, request
-from mercadopago.config import RequestOptions
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
-from telegram.ext import Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 load_dotenv()
 
@@ -40,12 +49,17 @@ DATABASE_PATH = Path(
 VIP_PRICE = 29.90
 VIP_PRICE_TEXT = "R$29,90"
 VIP_DURATION_DAYS = 30
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 TELEGRAM_TOKEN = (
     os.environ.get("TELEGRAM_TOKEN", "").strip()
     or os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 )
-MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "").strip()
+SYNCPAY_CLIENT_ID = os.environ.get("SYNCPAY_CLIENT_ID", "").strip()
+SYNCPAY_CLIENT_SECRET = os.environ.get("SYNCPAY_CLIENT_SECRET", "").strip()
+SYNCPAY_API_BASE_URL = os.environ.get("SYNCPAY_API_BASE_URL", "https://api.syncpayments.com.br").strip().rstrip("/")
+SYNCPAY_WEBHOOK_TOKEN = os.environ.get("SYNCPAY_WEBHOOK_TOKEN", "").strip()
+SYNCPAY_REQUEST_TIMEOUT = float(os.environ.get("SYNCPAY_REQUEST_TIMEOUT", "30"))
 GRUPO_VIP_ID_RAW = os.environ.get("GRUPO_VIP_ID", "").strip()
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
 
@@ -105,6 +119,17 @@ Casas recomendadas:
 
 💡 Tenha pelo menos 3 casas cadastradas."""
 
+PROFILE_PROMPT_TEXT = """💳 ASSINAR VIP
+
+Antes de gerar seu PIX pela SyncPay, envie seus dados neste formato:
+
+CPF; email; telefone
+
+Exemplo:
+12345678900; nome@exemplo.com; 5511999999999
+
+Esses dados ficam salvos para as próximas renovações."""
+
 CALLBACK_SUREBET = "surebet_info"
 CALLBACK_CALC = "surebet_calc"
 CALLBACK_ENTRIES = "surebet_entries"
@@ -121,6 +146,10 @@ BOT_THREAD: threading.Thread | None = None
 TELEGRAM_APP: Application | None = None
 TELEGRAM_LOOP: asyncio.AbstractEventLoop | None = None
 SCHEDULER: BackgroundScheduler | None = None
+
+SYNCPAY_AUTH_LOCK = threading.Lock()
+SYNCPAY_AUTH_TOKEN = ""
+SYNCPAY_AUTH_EXPIRES_AT: datetime | None = None
 
 
 def normalized_group_vip_id() -> int | None:
@@ -169,6 +198,23 @@ def database_connection() -> sqlite3.Connection:
     return connection
 
 
+def ensure_assinantes_columns(connection: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(assinantes)").fetchall()
+    }
+    required_columns = {
+        "cpf": "TEXT",
+        "email": "TEXT",
+        "telefone": "TEXT",
+    }
+    for column_name, column_type in required_columns.items():
+        if column_name not in existing_columns:
+            connection.execute(
+                f"ALTER TABLE assinantes ADD COLUMN {column_name} {column_type}"
+            )
+
+
 def init_database() -> None:
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with database_connection() as connection:
@@ -183,12 +229,25 @@ def init_database() -> None:
             )
             """
         )
+        ensure_assinantes_columns(connection)
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS pagamentos_processados (
                 payment_id TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 processed_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS syncpay_cobrancas (
+                identifier TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                pix_code TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             )
             """
         )
@@ -215,6 +274,24 @@ def save_pending_assinante(user_id: int, nome: str) -> None:
                 vencimento = NULL
             """,
             (user_id, nome),
+        )
+
+
+def save_payment_profile(user_id: int, nome: str, cpf: str, email: str, telefone: str) -> None:
+    with database_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO assinantes (
+                user_id, nome, status, data_pagamento, vencimento, cpf, email, telefone
+            )
+            VALUES (?, ?, 'pendente', NULL, NULL, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                nome = excluded.nome,
+                cpf = excluded.cpf,
+                email = excluded.email,
+                telefone = excluded.telefone
+            """,
+            (user_id, nome, cpf, email, telefone),
         )
 
 
@@ -274,19 +351,111 @@ def mark_payment_processed(payment_id: str, user_id: int) -> None:
         )
 
 
-def split_name(full_name: str) -> tuple[str, str]:
-    parts = full_name.strip().split(maxsplit=1)
-    if not parts:
-        return "Usuario", "Telegram"
-    if len(parts) == 1:
-        return parts[0], "Telegram"
-    return parts[0], parts[1]
+def get_syncpay_charge(identifier: str) -> sqlite3.Row | None:
+    with database_connection() as connection:
+        return connection.execute(
+            "SELECT * FROM syncpay_cobrancas WHERE identifier = ?",
+            (identifier,),
+        ).fetchone()
+
+
+def save_syncpay_charge(identifier: str, user_id: int, status: str, pix_code: str) -> None:
+    timestamp = datetime.now(APP_TIMEZONE).isoformat()
+    with database_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO syncpay_cobrancas (identifier, user_id, status, pix_code, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(identifier) DO UPDATE SET
+                user_id = excluded.user_id,
+                status = excluded.status,
+                pix_code = excluded.pix_code,
+                updated_at = excluded.updated_at
+            """,
+            (identifier, user_id, status, pix_code, timestamp, timestamp),
+        )
+
+
+def update_syncpay_charge_status(identifier: str, status: str, pix_code: str | None = None) -> None:
+    timestamp = datetime.now(APP_TIMEZONE).isoformat()
+    with database_connection() as connection:
+        if pix_code is None:
+            connection.execute(
+                """
+                UPDATE syncpay_cobrancas
+                SET status = ?, updated_at = ?
+                WHERE identifier = ?
+                """,
+                (status, timestamp, identifier),
+            )
+        else:
+            connection.execute(
+                """
+                UPDATE syncpay_cobrancas
+                SET status = ?, pix_code = ?, updated_at = ?
+                WHERE identifier = ?
+                """,
+                (status, pix_code, timestamp, identifier),
+            )
+
+
+def syncpay_profile_complete(assinante: sqlite3.Row | None) -> bool:
+    if assinante is None:
+        return False
+    return all(
+        str(assinante[field] or "").strip()
+        for field in ("cpf", "email", "telefone")
+    )
+
+
+def normalize_digits(value: str) -> str:
+    return re.sub(r"\D+", "", value)
+
+
+def normalize_cpf(value: str) -> str:
+    cpf = normalize_digits(value)
+    if len(cpf) != 11:
+        raise ValueError("CPF inválido. Envie exatamente 11 dígitos.")
+    return cpf
+
+
+def normalize_email(value: str) -> str:
+    email = value.strip().lower()
+    if not EMAIL_REGEX.fullmatch(email):
+        raise ValueError("E-mail inválido.")
+    return email
+
+
+def normalize_phone(value: str) -> str:
+    phone = normalize_digits(value)
+    if len(phone) < 10 or len(phone) > 13:
+        raise ValueError("Telefone inválido. Envie DDD + número.")
+    return phone
+
+
+def parse_profile_input(text: str) -> tuple[str, str, str]:
+    if ";" in text:
+        parts = [part.strip() for part in text.split(";") if part.strip()]
+    else:
+        parts = [line.strip() for line in text.splitlines() if line.strip()]
+
+    if len(parts) != 3:
+        raise ValueError("Formato inválido. Use: CPF; email; telefone")
+
+    cpf = normalize_cpf(parts[0])
+    email = normalize_email(parts[1])
+    phone = normalize_phone(parts[2])
+    return cpf, email, phone
 
 
 def missing_subscription_config() -> list[str]:
     missing: list[str] = []
-    if not MP_ACCESS_TOKEN:
-        missing.append("MP_ACCESS_TOKEN")
+    if not SYNCPAY_CLIENT_ID:
+        missing.append("SYNCPAY_CLIENT_ID")
+    if not SYNCPAY_CLIENT_SECRET:
+        missing.append("SYNCPAY_CLIENT_SECRET")
+    if not SYNCPAY_API_BASE_URL:
+        missing.append("SYNCPAY_API_BASE_URL")
     if not normalized_group_vip_id():
         missing.append("GRUPO_VIP_ID")
     if not notification_webhook_url():
@@ -294,80 +463,200 @@ def missing_subscription_config() -> list[str]:
     return missing
 
 
-def create_mercado_pago_sdk() -> mercadopago.SDK:
-    if not MP_ACCESS_TOKEN:
-        raise RuntimeError("MP_ACCESS_TOKEN não configurado.")
-    return mercadopago.SDK(MP_ACCESS_TOKEN)
+def parse_external_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
-def fetch_payment(payment_id: str) -> dict[str, Any]:
-    sdk = create_mercado_pago_sdk()
-    result = sdk.payment().get(payment_id)
-    response = result.get("response", {})
-    if not response:
-        raise RuntimeError(f"Pagamento {payment_id} não encontrado.")
-    return response
+def syncpay_api_url(path: str) -> str:
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    return f"{SYNCPAY_API_BASE_URL}{path}"
 
 
-def create_pix_charge(user_id: int, nome: str) -> str:
+def decode_json_response(response: requests.Response) -> dict[str, Any]:
+    if not response.content:
+        return {}
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise RuntimeError(f"Resposta inválida da SyncPay: {response.text}") from exc
+    if isinstance(payload, dict):
+        return payload
+    raise RuntimeError(f"Formato inesperado da SyncPay: {payload}")
+
+
+def get_syncpay_access_token(force_refresh: bool = False) -> str:
+    global SYNCPAY_AUTH_TOKEN, SYNCPAY_AUTH_EXPIRES_AT
+
+    if not SYNCPAY_CLIENT_ID or not SYNCPAY_CLIENT_SECRET:
+        raise RuntimeError("Credenciais da SyncPay não configuradas.")
+
+    with SYNCPAY_AUTH_LOCK:
+        now = datetime.now(timezone.utc)
+        if (
+            not force_refresh
+            and SYNCPAY_AUTH_TOKEN
+            and SYNCPAY_AUTH_EXPIRES_AT is not None
+            and now + timedelta(seconds=60) < SYNCPAY_AUTH_EXPIRES_AT
+        ):
+            return SYNCPAY_AUTH_TOKEN
+
+        response = requests.post(
+            syncpay_api_url("/api/partner/v1/auth-token"),
+            json={
+                "client_id": SYNCPAY_CLIENT_ID,
+                "client_secret": SYNCPAY_CLIENT_SECRET,
+            },
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            timeout=SYNCPAY_REQUEST_TIMEOUT,
+        )
+        payload = decode_json_response(response)
+        if response.status_code >= 400:
+            raise RuntimeError(f"Erro ao autenticar na SyncPay: {payload or response.text}")
+
+        access_token = str(payload.get("access_token") or "").strip()
+        if not access_token:
+            raise RuntimeError(f"SyncPay não retornou access_token: {payload}")
+
+        expires_at = parse_external_datetime(str(payload.get("expires_at") or "").strip())
+        if expires_at is None:
+            expires_in = int(payload.get("expires_in") or 3600)
+            expires_at = now + timedelta(seconds=expires_in)
+
+        SYNCPAY_AUTH_TOKEN = access_token
+        SYNCPAY_AUTH_EXPIRES_AT = expires_at
+        return access_token
+
+
+def syncpay_request(
+    method: str,
+    path: str,
+    *,
+    force_refresh: bool = False,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    headers = dict(kwargs.pop("headers", {}) or {})
+    headers.setdefault("Accept", "application/json")
+    if "json" in kwargs:
+        headers.setdefault("Content-Type", "application/json")
+    headers["Authorization"] = f"Bearer {get_syncpay_access_token(force_refresh=force_refresh)}"
+
+    response = requests.request(
+        method=method,
+        url=syncpay_api_url(path),
+        headers=headers,
+        timeout=SYNCPAY_REQUEST_TIMEOUT,
+        **kwargs,
+    )
+    payload = decode_json_response(response)
+
+    if response.status_code == 401 and not force_refresh:
+        return syncpay_request(method, path, force_refresh=True, **kwargs)
+
+    if response.status_code >= 400:
+        raise RuntimeError(f"Erro na SyncPay ({response.status_code}): {payload or response.text}")
+
+    return payload
+
+
+def fetch_syncpay_transaction(identifier: str) -> dict[str, Any]:
+    payload = syncpay_request("GET", f"/api/partner/v1/transaction/{identifier}")
+    data = payload.get("data") or {}
+    if not data:
+        raise RuntimeError(f"Transação {identifier} não encontrada na SyncPay.")
+    return data
+
+
+def create_syncpay_charge(
+    user_id: int,
+    nome: str,
+    cpf: str,
+    email: str,
+    telefone: str,
+) -> str:
     webhook_url = notification_webhook_url()
     if not webhook_url:
         raise RuntimeError("WEBHOOK_URL não configurado.")
 
-    sdk = create_mercado_pago_sdk()
-    first_name, last_name = split_name(nome)
-
-    payment_data = {
-        "transaction_amount": VIP_PRICE,
+    payload = {
+        "amount": VIP_PRICE,
         "description": "Assinatura VIP Surebet - 30 dias",
-        "payment_method_id": "pix",
-        "notification_url": webhook_url,
-        "external_reference": str(user_id),
-        "metadata": {
-            "telegram_user_id": str(user_id),
-            "telegram_nome": nome,
-        },
-        "payer": {
-            "email": f"telegram-{user_id}@example.com",
-            "first_name": first_name,
-            "last_name": last_name,
+        "webhook_url": webhook_url,
+        "client": {
+            "name": nome,
+            "cpf": cpf,
+            "email": email,
+            "phone": telefone,
         },
     }
 
-    request_options = RequestOptions()
-    request_options.custom_headers = {
-        "x-idempotency-key": str(uuid.uuid4()),
-    }
+    response = syncpay_request("POST", "/api/partner/v1/cash-in", json=payload)
+    pix_code = str(response.get("pix_code") or "").strip()
+    identifier = str(response.get("identifier") or "").strip()
 
-    result = sdk.payment().create(payment_data, request_options)
-    response = result.get("response", {})
-    qr_code = (
-        response.get("point_of_interaction", {})
-        .get("transaction_data", {})
-        .get("qr_code")
-    )
-
-    if not qr_code:
-        raise RuntimeError(f"Não foi possível gerar o código PIX: {response}")
+    if not pix_code or not identifier:
+        raise RuntimeError(f"Não foi possível gerar o PIX na SyncPay: {response}")
 
     save_pending_assinante(user_id, nome)
+    save_payment_profile(user_id, nome, cpf, email, telefone)
+    save_syncpay_charge(identifier, user_id, "pending", pix_code)
 
     return (
         "💳 ASSINAR VIP\n\n"
-        f"Valor: {VIP_PRICE_TEXT}\n\n"
+        f"Valor: {VIP_PRICE_TEXT}\n"
+        f"Identificador: {identifier}\n\n"
         "Use o código PIX copia e cola abaixo para concluir sua assinatura:\n\n"
-        f"`{qr_code}`\n\n"
+        f"{pix_code}\n\n"
         "Assim que o pagamento for aprovado, você receberá automaticamente o link exclusivo do grupo VIP."
     )
 
 
-def extract_payment_id(payload: dict[str, Any]) -> str:
+def extract_syncpay_identifier(payload: dict[str, Any]) -> str:
+    data = payload.get("data")
+    if isinstance(data, dict):
+        value = (
+            data.get("id")
+            or data.get("identifier")
+            or data.get("reference_id")
+        )
+        if value:
+            return str(value).strip()
     return (
-        str(payload.get("data", {}).get("id") or "").strip()
-        or str(payload.get("id") or "").strip()
-        or str(request.args.get("data.id") or "").strip()
+        str(payload.get("identifier") or "").strip()
+        or str(request.args.get("identifier") or "").strip()
         or str(request.args.get("id") or "").strip()
     )
+
+
+def syncpay_payload_data(payload: dict[str, Any]) -> dict[str, Any]:
+    data = payload.get("data")
+    if isinstance(data, dict):
+        return data
+    return {}
+
+
+def syncpay_webhook_authorized() -> bool:
+    if not SYNCPAY_WEBHOOK_TOKEN:
+        return True
+    authorization = request.headers.get("Authorization", "").strip()
+    expected = f"Bearer {SYNCPAY_WEBHOOK_TOKEN}"
+    return secrets.compare_digest(authorization, expected)
 
 
 def run_telegram_coroutine(coro: Any) -> Any:
@@ -410,29 +699,41 @@ async def remove_user_from_group(user_id: int) -> None:
     )
 
 
-def process_approved_payment(payment_id: str) -> None:
-    if payment_already_processed(payment_id):
-        logger.info("Pagamento %s já processado anteriormente.", payment_id)
+def process_completed_payment(identifier: str, payload_data: dict[str, Any] | None = None) -> None:
+    if payment_already_processed(identifier):
+        logger.info("Pagamento %s já processado anteriormente.", identifier)
         return
 
-    payment = fetch_payment(payment_id)
-    if payment.get("status") != "approved":
+    charge = get_syncpay_charge(identifier)
+    if charge is None:
+        logger.warning("Cobrança SyncPay %s recebida sem mapeamento local.", identifier)
+        return
+
+    data = payload_data or {}
+    status = str(data.get("status") or "").strip().lower()
+    pix_code = str(data.get("pix_code") or "").strip() or str(charge["pix_code"] or "").strip()
+
+    if not status:
+        transaction = fetch_syncpay_transaction(identifier)
+        status = str(transaction.get("status") or "").strip().lower()
+        pix_code = str(transaction.get("pix_code") or "").strip() or pix_code
+
+    update_syncpay_charge_status(identifier, status or "pending", pix_code or None)
+
+    if status != "completed":
         logger.info(
-            "Pagamento %s ainda não aprovado. Status atual: %s",
-            payment_id,
-            payment.get("status"),
+            "Cobrança SyncPay %s ainda não concluída. Status atual: %s",
+            identifier,
+            status or "desconhecido",
         )
         return
 
-    metadata = payment.get("metadata") or {}
-    user_id_raw = metadata.get("telegram_user_id") or payment.get("external_reference")
-    if not user_id_raw:
-        raise RuntimeError(f"Pagamento {payment_id} sem telegram_user_id nos metadados.")
-
-    user_id = int(user_id_raw)
+    user_id = int(charge["user_id"])
+    assinante = get_assinante(user_id)
+    client = data.get("client") if isinstance(data.get("client"), dict) else {}
     nome = (
-        str(metadata.get("telegram_nome") or "").strip()
-        or str((payment.get("payer") or {}).get("first_name") or "").strip()
+        str((assinante["nome"] if assinante else "") or "").strip()
+        or str(client.get("name") or "").strip()
         or f"Usuario {user_id}"
     )
 
@@ -448,8 +749,8 @@ def process_approved_payment(payment_id: str) -> None:
 
     run_telegram_coroutine(send_private_message(user_id, welcome_text))
     activate_assinante(user_id, nome, data_pagamento.isoformat(), vencimento.isoformat())
-    mark_payment_processed(payment_id, user_id)
-    logger.info("Pagamento %s aprovado para user_id=%s.", payment_id, user_id)
+    mark_payment_processed(identifier, user_id)
+    logger.info("Pagamento SyncPay %s aprovado para user_id=%s.", identifier, user_id)
 
 
 def expire_due_subscribers() -> None:
@@ -529,6 +830,22 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await show_main_menu(update, context)
 
 
+async def send_profile_prompt(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    via_callback: bool,
+) -> None:
+    context.user_data["awaiting_syncpay_profile"] = True
+    message = update.effective_message
+    if message is None:
+        return
+    if via_callback:
+        await present_callback_text(update, PROFILE_PROMPT_TEXT)
+    else:
+        await message.reply_text(PROFILE_PROMPT_TEXT, reply_markup=back_to_menu_keyboard())
+
+
 async def handle_subscription_request(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -570,6 +887,14 @@ async def handle_subscription_request(
             await message.reply_text(config_text, reply_markup=back_to_menu_keyboard())
         return
 
+    if not syncpay_profile_complete(existing):
+        await send_profile_prompt(update, context, via_callback=via_callback)
+        return
+
+    cpf = str(existing["cpf"] or "").strip()
+    email = str(existing["email"] or "").strip()
+    telefone = str(existing["telefone"] or "").strip()
+
     if via_callback and update.callback_query is not None:
         await safe_answer_callback(update.callback_query)
         status_message = await message.reply_text("Gerando sua cobrança PIX...")
@@ -577,9 +902,16 @@ async def handle_subscription_request(
         status_message = await message.reply_text("Gerando sua cobrança PIX...")
 
     try:
-        payment_text = await asyncio.to_thread(create_pix_charge, user.id, user.full_name)
+        payment_text = await asyncio.to_thread(
+            create_syncpay_charge,
+            user.id,
+            user.full_name,
+            cpf,
+            email,
+            telefone,
+        )
     except Exception as exc:
-        logger.exception("Falha ao gerar cobrança PIX: %s", exc)
+        logger.exception("Falha ao gerar cobrança PIX na SyncPay: %s", exc)
         await status_message.edit_text(
             "❌ Não consegui gerar sua cobrança PIX agora. Tente novamente em alguns instantes.",
             reply_markup=back_to_menu_keyboard(),
@@ -589,7 +921,6 @@ async def handle_subscription_request(
     await status_message.edit_text(
         payment_text,
         reply_markup=back_to_menu_keyboard(),
-        parse_mode="Markdown",
     )
 
 
@@ -597,6 +928,57 @@ async def assinar_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await handle_subscription_request(update, context, via_callback=False)
 
 
+async def profile_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.user_data.get("awaiting_syncpay_profile"):
+        return
+
+    user = update.effective_user
+    message = update.effective_message
+    if user is None or message is None or not message.text:
+        return
+
+    try:
+        cpf, email, telefone = parse_profile_input(message.text)
+    except ValueError as exc:
+        await message.reply_text(
+            f"❌ {exc}\n\n{PROFILE_PROMPT_TEXT}",
+            reply_markup=back_to_menu_keyboard(),
+        )
+        return
+
+    context.user_data.pop("awaiting_syncpay_profile", None)
+    await asyncio.to_thread(
+        save_payment_profile,
+        user.id,
+        user.full_name,
+        cpf,
+        email,
+        telefone,
+    )
+
+    status_message = await message.reply_text("Dados recebidos. Gerando sua cobrança PIX...")
+
+    try:
+        payment_text = await asyncio.to_thread(
+            create_syncpay_charge,
+            user.id,
+            user.full_name,
+            cpf,
+            email,
+            telefone,
+        )
+    except Exception as exc:
+        logger.exception("Falha ao gerar cobrança PIX na SyncPay: %s", exc)
+        await status_message.edit_text(
+            "❌ Não consegui gerar sua cobrança PIX agora. Tente novamente em alguns instantes.",
+            reply_markup=back_to_menu_keyboard(),
+        )
+        return
+
+    await status_message.edit_text(
+        payment_text,
+        reply_markup=back_to_menu_keyboard(),
+    )
 async def group_service_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     chat = update.effective_chat
@@ -675,6 +1057,7 @@ async def telegram_bot_main() -> None:
             group_service_message_handler,
         )
     )
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, profile_message_handler))
 
     TELEGRAM_APP = application
     TELEGRAM_LOOP = asyncio.get_running_loop()
@@ -769,34 +1152,31 @@ def health() -> tuple[str, int]:
 
 
 @app.post("/webhook")
-def mercadopago_webhook() -> tuple[dict[str, Any], int]:
+def syncpay_webhook() -> tuple[dict[str, Any], int]:
+    if not syncpay_webhook_authorized():
+        return {"status": "forbidden"}, 401
+
     payload = request.get_json(silent=True) or {}
-    payment_id = extract_payment_id(payload)
-    notification_type = (
-        str(
-            payload.get("type")
-            or payload.get("topic")
-            or request.args.get("type")
-            or request.args.get("topic")
-            or ""
-        )
+    event_name = (
+        str(request.headers.get("event") or payload.get("event") or "")
         .strip()
         .lower()
     )
+    identifier = extract_syncpay_identifier(payload)
 
-    if not payment_id:
-        return {"status": "ignored", "reason": "missing_payment_id"}, 200
+    if event_name and not event_name.startswith("cashin"):
+        return {"status": "ignored", "reason": event_name}, 200
 
-    if notification_type and notification_type != "payment":
-        return {"status": "ignored", "reason": notification_type}, 200
+    if not identifier:
+        return {"status": "ignored", "reason": "missing_identifier"}, 200
 
     try:
-        process_approved_payment(payment_id)
+        process_completed_payment(identifier, syncpay_payload_data(payload))
     except Exception as exc:
-        logger.exception("Falha ao processar webhook do pagamento %s: %s", payment_id, exc)
+        logger.exception("Falha ao processar webhook SyncPay %s: %s", identifier, exc)
         return {"status": "error"}, 500
 
-    return {"status": "ok", "payment_id": payment_id}, 200
+    return {"status": "ok", "identifier": identifier}, 200
 
 
 ensure_services_started()
