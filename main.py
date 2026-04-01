@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import secrets
@@ -15,7 +16,7 @@ from zoneinfo import ZoneInfo
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
-from flask import Flask, request
+from flask import Flask, redirect, render_template_string, request, session, url_for
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
 from telegram.ext import (
@@ -47,8 +48,15 @@ DATABASE_PATH = Path(
 ).expanduser()
 DEFAULT_CURRENCY_CODE = "BRL"
 FUNNEL_VIDEO_PATH = Path(__file__).with_name("vids.mp4")
+FUNNEL_CONFIG_PATH = Path(
+    os.environ.get(
+        "FUNNEL_CONFIG_PATH",
+        str(Path(__file__).with_name("funnel_config.json")),
+    )
+).expanduser()
+FUNNEL_EDITOR_PASSWORD = os.environ.get("FUNNEL_EDITOR_PASSWORD", "").strip()
 
-PLANS: dict[str, dict[str, Any]] = {
+DEFAULT_PLANS: dict[str, dict[str, Any]] = {
     "week_offer": {
         "label": "⭐ 1 Semana VIP ⭐",
         "price": 6.02,
@@ -199,7 +207,8 @@ Casas recomendadas:
 
 💡 Tenha pelo menos 3 casas cadastradas."""
 
-VIP_FUNNEL_TEXT = """⬆️ VEJA COMO É O VIP POR DENTRO
+DEFAULT_FUNNEL_TEXTS = {
+    "vip_funnel_text": """⬆️ VEJA COMO É O VIP POR DENTRO
 DIVIDIDO EM TÓPICOS PARA VOCÊ 🔴
 
 No VIP você recebe:
@@ -213,25 +222,23 @@ No VIP você recebe:
 🚀 Acesso imediato
 ⏱️ Condição promocional por tempo limitado
 
-Escolha uma opção abaixo para continuar 👇"""
-
-DOWSELL_TEXT = """20 segundos e essa condição pode sair do ar ✅
+Escolha uma opção abaixo para continuar 👇""",
+    "downsell_text": """20 segundos e essa condição pode sair do ar ✅
 
 Liberamos uma condição melhor para sua entrada no VIP.
 
-Se quiser aproveitar o menor valor disponível agora, escolha uma das opções abaixo 👇"""
-
-UPSELL_1_TEXT = """🔼 ESPAÇO RESERVADO PARA UPSELL 1
+Se quiser aproveitar o menor valor disponível agora, escolha uma das opções abaixo 👇""",
+    "upsell_1_text": """🔼 ESPAÇO RESERVADO PARA UPSELL 1
 
 Preencha este bloco com a copy do seu primeiro upsell.
 
-Quando quiser ativar, basta ajustar os textos e preços abaixo 👇"""
-
-UPSELL_2_TEXT = """🔼 ESPAÇO RESERVADO PARA UPSELL 2
+Quando quiser ativar, basta ajustar os textos e preços abaixo 👇""",
+    "upsell_2_text": """🔼 ESPAÇO RESERVADO PARA UPSELL 2
 
 Preencha este bloco com a copy do seu segundo upsell.
 
-Quando quiser ativar, basta ajustar os textos e preços abaixo 👇"""
+Quando quiser ativar, basta ajustar os textos e preços abaixo 👇""",
+}
 
 CALLBACK_SUREBET = "surebet_info"
 CALLBACK_CALC = "surebet_calc"
@@ -248,6 +255,7 @@ CALLBACK_UPSELL_1_PLAN_PREFIX = "vip_upsell_1_plan:"
 CALLBACK_UPSELL_2_PLAN_PREFIX = "vip_upsell_2_plan:"
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.environ.get("TELEGRAM_TOKEN", "surebet-editor-secret"))
 
 BOOTSTRAP_LOCK = threading.Lock()
 SERVICES_STARTED = False
@@ -320,23 +328,88 @@ def back_to_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def load_funnel_config() -> dict[str, Any]:
+    if not FUNNEL_CONFIG_PATH.exists():
+        return {}
+    try:
+        with FUNNEL_CONFIG_PATH.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+    except (OSError, ValueError) as exc:
+        logger.warning("Falha ao ler funnel_config.json: %s", exc)
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_funnel_config(config: dict[str, Any]) -> None:
+    FUNNEL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with FUNNEL_CONFIG_PATH.open("w", encoding="utf-8") as file:
+        json.dump(config, file, ensure_ascii=False, indent=2)
+
+
+def current_plans() -> dict[str, dict[str, Any]]:
+    config = load_funnel_config()
+    configured_plans = config.get("plans")
+    merged = {key: value.copy() for key, value in DEFAULT_PLANS.items()}
+    if not isinstance(configured_plans, dict):
+        return merged
+
+    for plan_code, default_plan in merged.items():
+        raw_override = configured_plans.get(plan_code)
+        if not isinstance(raw_override, dict):
+            continue
+        override = raw_override.copy()
+        if "price" in override:
+            try:
+                override["price"] = float(override["price"])
+            except (TypeError, ValueError):
+                override.pop("price", None)
+        if "duration_days" in override and override["duration_days"] not in {"", None}:
+            try:
+                override["duration_days"] = int(override["duration_days"])
+            except (TypeError, ValueError):
+                override.pop("duration_days", None)
+        elif override.get("duration_days") == "":
+            override["duration_days"] = None
+        merged[plan_code].update(override)
+    return merged
+
+
+def current_funnel_text(key: str) -> str:
+    config = load_funnel_config()
+    texts = config.get("texts")
+    if isinstance(texts, dict):
+        value = texts.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return DEFAULT_FUNNEL_TEXTS[key]
+
+
+def build_funnel_editor_config() -> dict[str, Any]:
+    return {
+        "texts": {key: current_funnel_text(key) for key in DEFAULT_FUNNEL_TEXTS},
+        "plans": current_plans(),
+    }
+
+
 def initial_offer_keyboard() -> InlineKeyboardMarkup:
+    plans = current_plans()
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(PLANS["week_offer"]["label"] + " por " + PLANS["week_offer"]["price_text"], callback_data=CALLBACK_PLAN_PREFIX + "week_offer")],
-            [InlineKeyboardButton(PLANS["lifetime_offer"]["label"] + " por " + PLANS["lifetime_offer"]["price_text"], callback_data=CALLBACK_PLAN_PREFIX + "lifetime_offer")],
-            [InlineKeyboardButton(PLANS["lifetime_secret_offer"]["label"] + " por " + PLANS["lifetime_secret_offer"]["price_text"], callback_data=CALLBACK_PLAN_PREFIX + "lifetime_secret_offer")],
+            [InlineKeyboardButton(plans["week_offer"]["label"] + " por " + plans["week_offer"]["price_text"], callback_data=CALLBACK_PLAN_PREFIX + "week_offer")],
+            [InlineKeyboardButton(plans["lifetime_offer"]["label"] + " por " + plans["lifetime_offer"]["price_text"], callback_data=CALLBACK_PLAN_PREFIX + "lifetime_offer")],
+            [InlineKeyboardButton(plans["lifetime_secret_offer"]["label"] + " por " + plans["lifetime_secret_offer"]["price_text"], callback_data=CALLBACK_PLAN_PREFIX + "lifetime_secret_offer")],
             [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
         ]
     )
 
 
 def downsell_keyboard() -> InlineKeyboardMarkup:
+    plans = current_plans()
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(PLANS["week_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "week_downsell")],
-            [InlineKeyboardButton(PLANS["lifetime_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "lifetime_downsell")],
-            [InlineKeyboardButton(PLANS["lifetime_secret_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "lifetime_secret_downsell")],
+            [InlineKeyboardButton(plans["week_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "week_downsell")],
+            [InlineKeyboardButton(plans["lifetime_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "lifetime_downsell")],
+            [InlineKeyboardButton(plans["lifetime_secret_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "lifetime_secret_downsell")],
             [InlineKeyboardButton("🔼 Abrir Upsell 1", callback_data=CALLBACK_UPSELL_1)],
             [InlineKeyboardButton("🔼 Abrir Upsell 2", callback_data=CALLBACK_UPSELL_2)],
             [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
@@ -345,10 +418,11 @@ def downsell_keyboard() -> InlineKeyboardMarkup:
 
 
 def upsell_1_keyboard() -> InlineKeyboardMarkup:
+    plans = current_plans()
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(PLANS["upsell_1_primary"]["label"] + " por " + PLANS["upsell_1_primary"]["price_text"], callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_primary")],
-            [InlineKeyboardButton(PLANS["upsell_1_secondary"]["label"] + " por " + PLANS["upsell_1_secondary"]["price_text"], callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_secondary")],
+            [InlineKeyboardButton(plans["upsell_1_primary"]["label"] + " por " + plans["upsell_1_primary"]["price_text"], callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_primary")],
+            [InlineKeyboardButton(plans["upsell_1_secondary"]["label"] + " por " + plans["upsell_1_secondary"]["price_text"], callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_secondary")],
             [InlineKeyboardButton("🔼 Ir para Upsell 2", callback_data=CALLBACK_UPSELL_2)],
             [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
         ]
@@ -356,17 +430,18 @@ def upsell_1_keyboard() -> InlineKeyboardMarkup:
 
 
 def upsell_2_keyboard() -> InlineKeyboardMarkup:
+    plans = current_plans()
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(PLANS["upsell_2_primary"]["label"] + " por " + PLANS["upsell_2_primary"]["price_text"], callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_primary")],
-            [InlineKeyboardButton(PLANS["upsell_2_secondary"]["label"] + " por " + PLANS["upsell_2_secondary"]["price_text"], callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_secondary")],
+            [InlineKeyboardButton(plans["upsell_2_primary"]["label"] + " por " + plans["upsell_2_primary"]["price_text"], callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_primary")],
+            [InlineKeyboardButton(plans["upsell_2_secondary"]["label"] + " por " + plans["upsell_2_secondary"]["price_text"], callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_secondary")],
             [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
         ]
     )
 
 
 def get_plan(plan_code: str) -> dict[str, Any]:
-    plan = PLANS.get(plan_code)
+    plan = current_plans().get(plan_code)
     if plan is None:
         raise KeyError(plan_code)
     return plan
@@ -1153,12 +1228,15 @@ async def show_subscription_offer(
         with FUNNEL_VIDEO_PATH.open("rb") as video_file:
             await message.reply_video(
                 video=video_file,
-                caption=VIP_FUNNEL_TEXT,
+                caption=current_funnel_text("vip_funnel_text"),
                 reply_markup=initial_offer_keyboard(),
             )
         return
 
-    await message.reply_text(VIP_FUNNEL_TEXT, reply_markup=initial_offer_keyboard())
+    await message.reply_text(
+        current_funnel_text("vip_funnel_text"),
+        reply_markup=initial_offer_keyboard(),
+    )
 
 
 async def create_charge_for_plan(
@@ -1280,7 +1358,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data.startswith(CALLBACK_PLAN_PREFIX):
-        await show_offer_stage(update, DOWSELL_TEXT, downsell_keyboard())
+        await show_offer_stage(
+            update,
+            current_funnel_text("downsell_text"),
+            downsell_keyboard(),
+        )
         return
 
     if data.startswith(CALLBACK_DOWNSELL_PLAN_PREFIX):
@@ -1289,11 +1371,19 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == CALLBACK_UPSELL_1:
-        await show_offer_stage(update, UPSELL_1_TEXT, upsell_1_keyboard())
+        await show_offer_stage(
+            update,
+            current_funnel_text("upsell_1_text"),
+            upsell_1_keyboard(),
+        )
         return
 
     if data == CALLBACK_UPSELL_2:
-        await show_offer_stage(update, UPSELL_2_TEXT, upsell_2_keyboard())
+        await show_offer_stage(
+            update,
+            current_funnel_text("upsell_2_text"),
+            upsell_2_keyboard(),
+        )
         return
 
     if data.startswith(CALLBACK_UPSELL_1_PLAN_PREFIX):
@@ -1433,6 +1523,272 @@ def index() -> tuple[dict[str, str], int]:
 @app.get("/health")
 def health() -> tuple[str, int]:
     return "OK", 200
+
+
+def funnel_editor_authorized() -> bool:
+    if not FUNNEL_EDITOR_PASSWORD:
+        return True
+    return bool(session.get("funnel_editor_authenticated"))
+
+
+FUNNEL_EDITOR_TEMPLATE = """
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Editor de Funil</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: Arial, sans-serif; margin: 0; background: #f4f6f8; color: #111; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; }
+    .card { background: #fff; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,.06); padding: 20px; }
+    h1, h2, h3 { margin: 0 0 14px; }
+    h2 { font-size: 18px; margin-top: 24px; }
+    h3 { font-size: 15px; margin-top: 18px; }
+    label { display: block; font-size: 13px; font-weight: 700; margin: 12px 0 6px; }
+    input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #ccd3da; border-radius: 10px; padding: 10px 12px; font: inherit; }
+    textarea { min-height: 130px; resize: vertical; }
+    .plans { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .plan { border: 1px solid #e4e8ec; border-radius: 12px; padding: 14px; }
+    .plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .actions { position: sticky; bottom: 0; background: #fff; padding-top: 14px; margin-top: 20px; display: flex; gap: 10px; }
+    button, .button { border: 0; border-radius: 10px; padding: 12px 16px; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-block; }
+    .primary { background: #0d8b4f; color: #fff; }
+    .secondary { background: #eef2f5; color: #111; }
+    .notice { background: #e8fff1; color: #0d6a3c; padding: 12px 14px; border-radius: 10px; margin-bottom: 14px; }
+    .preview-stage { border: 1px solid #e4e8ec; border-radius: 12px; padding: 14px; margin-bottom: 14px; background: #fafcfd; }
+    .preview-text { white-space: pre-wrap; background: #fff; border: 1px solid #e4e8ec; border-radius: 10px; padding: 12px; min-height: 110px; }
+    .preview-buttons { display: grid; gap: 8px; margin-top: 12px; }
+    .preview-buttons span { background: #dff1e7; color: #1b5d3d; border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+    .muted { color: #67707a; font-size: 13px; }
+    .login { max-width: 420px; margin: 60px auto; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .plans { grid-template-columns: 1fr; } .plan-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    {% if login_required %}
+      <div class="card login">
+        <h1>Entrar no Editor</h1>
+        <p class="muted">Configure a senha em <code>FUNNEL_EDITOR_PASSWORD</code>.</p>
+        <form method="post" action="{{ url_for('funnel_editor_login') }}">
+          <label>Senha</label>
+          <input type="password" name="password" required>
+          <div class="actions">
+            <button class="primary" type="submit">Entrar</button>
+          </div>
+        </form>
+      </div>
+    {% else %}
+      <div class="top">
+        <div>
+          <h1>Editor Visual do Funil</h1>
+          <div class="muted">Edite textos, preços e botões do funil sem mexer no código.</div>
+        </div>
+        <div>
+          {% if password_enabled %}
+            <a class="button secondary" href="{{ url_for('funnel_editor_logout') }}">Sair</a>
+          {% endif %}
+        </div>
+      </div>
+      {% if saved %}
+        <div class="notice">Funil salvo com sucesso.</div>
+      {% endif %}
+      <div class="grid">
+        <form class="card" method="post" action="{{ url_for('funnel_editor_save') }}">
+          <h2>Textos</h2>
+          {% for text_key, text_value in texts.items() %}
+            <label>{{ text_labels[text_key] }}</label>
+            <textarea name="text__{{ text_key }}" data-preview-text="{{ text_key }}">{{ text_value }}</textarea>
+          {% endfor %}
+
+          <h2>Planos</h2>
+          <div class="plans">
+            {% for plan_code, plan in plans.items() %}
+              <div class="plan">
+                <h3>{{ plan_code }}</h3>
+                <label>Label</label>
+                <input name="plan__{{ plan_code }}__label" value="{{ plan['label'] }}" data-preview-plan="{{ plan_code }}__label">
+                <div class="plan-grid">
+                  <div>
+                    <label>Preço</label>
+                    <input name="plan__{{ plan_code }}__price" value="{{ plan['price'] }}">
+                  </div>
+                  <div>
+                    <label>Preço exibido</label>
+                    <input name="plan__{{ plan_code }}__price_text" value="{{ plan['price_text'] }}" data-preview-plan="{{ plan_code }}__price_text">
+                  </div>
+                  <div>
+                    <label>Duração em dias</label>
+                    <input name="plan__{{ plan_code }}__duration_days" value="{{ '' if plan['duration_days'] is none else plan['duration_days'] }}">
+                  </div>
+                  <div>
+                    <label>Tipo</label>
+                    <input name="plan__{{ plan_code }}__kind" value="{{ plan['kind'] }}">
+                  </div>
+                </div>
+                <label>Descrição interna</label>
+                <input name="plan__{{ plan_code }}__description" value="{{ plan['description'] }}">
+              </div>
+            {% endfor %}
+          </div>
+          <div class="actions">
+            <button class="primary" type="submit">Salvar funil</button>
+            <button class="secondary" type="submit" formaction="{{ url_for('funnel_editor_reset') }}" formmethod="post">Restaurar padrão</button>
+          </div>
+        </form>
+
+        <div class="card">
+          <h2>Preview</h2>
+          <div class="preview-stage">
+            <h3>Oferta inicial</h3>
+            <div class="preview-text" id="preview_vip_funnel_text">{{ texts["vip_funnel_text"] }}</div>
+            <div class="preview-buttons">
+              <span id="preview_plan_week_offer">{{ plans["week_offer"]["label"] }} por {{ plans["week_offer"]["price_text"] }}</span>
+              <span id="preview_plan_lifetime_offer">{{ plans["lifetime_offer"]["label"] }} por {{ plans["lifetime_offer"]["price_text"] }}</span>
+              <span id="preview_plan_lifetime_secret_offer">{{ plans["lifetime_secret_offer"]["label"] }} por {{ plans["lifetime_secret_offer"]["price_text"] }}</span>
+            </div>
+          </div>
+          <div class="preview-stage">
+            <h3>Downsell</h3>
+            <div class="preview-text" id="preview_downsell_text">{{ texts["downsell_text"] }}</div>
+            <div class="preview-buttons">
+              <span id="preview_plan_week_downsell">{{ plans["week_downsell"]["label"] }}</span>
+              <span id="preview_plan_lifetime_downsell">{{ plans["lifetime_downsell"]["label"] }}</span>
+              <span id="preview_plan_lifetime_secret_downsell">{{ plans["lifetime_secret_downsell"]["label"] }}</span>
+            </div>
+          </div>
+          <div class="preview-stage">
+            <h3>Upsell 1</h3>
+            <div class="preview-text" id="preview_upsell_1_text">{{ texts["upsell_1_text"] }}</div>
+            <div class="preview-buttons">
+              <span id="preview_plan_upsell_1_primary">{{ plans["upsell_1_primary"]["label"] }} por {{ plans["upsell_1_primary"]["price_text"] }}</span>
+              <span id="preview_plan_upsell_1_secondary">{{ plans["upsell_1_secondary"]["label"] }} por {{ plans["upsell_1_secondary"]["price_text"] }}</span>
+            </div>
+          </div>
+          <div class="preview-stage">
+            <h3>Upsell 2</h3>
+            <div class="preview-text" id="preview_upsell_2_text">{{ texts["upsell_2_text"] }}</div>
+            <div class="preview-buttons">
+              <span id="preview_plan_upsell_2_primary">{{ plans["upsell_2_primary"]["label"] }} por {{ plans["upsell_2_primary"]["price_text"] }}</span>
+              <span id="preview_plan_upsell_2_secondary">{{ plans["upsell_2_secondary"]["label"] }} por {{ plans["upsell_2_secondary"]["price_text"] }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+  <script>
+    for (const el of document.querySelectorAll('[data-preview-text]')) {
+      el.addEventListener('input', () => {
+        const target = document.getElementById('preview_' + el.dataset.previewText);
+        if (target) target.textContent = el.value;
+      });
+    }
+    for (const el of document.querySelectorAll('[data-preview-plan]')) {
+      el.addEventListener('input', () => {
+        const [planCode, field] = el.dataset.previewPlan.split('__');
+        const target = document.getElementById('preview_plan_' + planCode);
+        if (!target) return;
+        const label = document.querySelector(`[name="plan__${planCode}__label"]`)?.value || '';
+        const priceText = document.querySelector(`[name="plan__${planCode}__price_text"]`)?.value || '';
+        target.textContent = priceText ? `${label} por ${priceText}` : label;
+      });
+    }
+  </script>
+</body>
+</html>
+"""
+
+
+@app.get("/funnel-editor")
+def funnel_editor() -> str:
+    if not funnel_editor_authorized():
+        return render_template_string(
+            FUNNEL_EDITOR_TEMPLATE,
+            login_required=True,
+            password_enabled=bool(FUNNEL_EDITOR_PASSWORD),
+        )
+
+    config = build_funnel_editor_config()
+    return render_template_string(
+        FUNNEL_EDITOR_TEMPLATE,
+        login_required=False,
+        password_enabled=bool(FUNNEL_EDITOR_PASSWORD),
+        saved=request.args.get("saved") == "1",
+        texts=config["texts"],
+        plans=config["plans"],
+        text_labels={
+            "vip_funnel_text": "Texto da oferta inicial",
+            "downsell_text": "Texto do downsell",
+            "upsell_1_text": "Texto do upsell 1",
+            "upsell_2_text": "Texto do upsell 2",
+        },
+    )
+
+
+@app.post("/funnel-editor/login")
+def funnel_editor_login() -> Any:
+    if not FUNNEL_EDITOR_PASSWORD:
+        return redirect(url_for("funnel_editor"))
+    if secrets.compare_digest(request.form.get("password", ""), FUNNEL_EDITOR_PASSWORD):
+        session["funnel_editor_authenticated"] = True
+    return redirect(url_for("funnel_editor"))
+
+
+@app.get("/funnel-editor/logout")
+def funnel_editor_logout() -> Any:
+    session.pop("funnel_editor_authenticated", None)
+    return redirect(url_for("funnel_editor"))
+
+
+@app.post("/funnel-editor/save")
+def funnel_editor_save() -> Any:
+    if not funnel_editor_authorized():
+        return redirect(url_for("funnel_editor"))
+
+    config = {
+        "texts": {},
+        "plans": {},
+    }
+    for text_key in DEFAULT_FUNNEL_TEXTS:
+        config["texts"][text_key] = request.form.get(f"text__{text_key}", DEFAULT_FUNNEL_TEXTS[text_key])
+
+    for plan_code, default_plan in DEFAULT_PLANS.items():
+        saved_plan: dict[str, Any] = {}
+        for field_name, default_value in default_plan.items():
+            raw_value = request.form.get(f"plan__{plan_code}__{field_name}", default_value)
+            if field_name == "price":
+                try:
+                    saved_plan[field_name] = float(raw_value)
+                except (TypeError, ValueError):
+                    saved_plan[field_name] = float(default_value)
+            elif field_name == "duration_days":
+                if raw_value in {"", None}:
+                    saved_plan[field_name] = None
+                else:
+                    try:
+                        saved_plan[field_name] = int(raw_value)
+                    except (TypeError, ValueError):
+                        saved_plan[field_name] = default_value
+            else:
+                saved_plan[field_name] = str(raw_value)
+        config["plans"][plan_code] = saved_plan
+
+    save_funnel_config(config)
+    return redirect(url_for("funnel_editor", saved=1))
+
+
+@app.post("/funnel-editor/reset")
+def funnel_editor_reset() -> Any:
+    if not funnel_editor_authorized():
+        return redirect(url_for("funnel_editor"))
+    if FUNNEL_CONFIG_PATH.exists():
+        FUNNEL_CONFIG_PATH.unlink()
+    return redirect(url_for("funnel_editor", saved=1))
 
 
 @app.post("/webhook")
