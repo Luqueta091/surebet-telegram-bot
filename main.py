@@ -97,6 +97,38 @@ PLANS: dict[str, dict[str, Any]] = {
         "description": "Assinatura vitalícia VIP Surebet + materiais extras - downsell",
         "kind": "downsell",
     },
+    "upsell_1_primary": {
+        "label": "⚡ Upsell 1 Principal",
+        "price": 29.90,
+        "price_text": "R$ 29.90",
+        "duration_days": None,
+        "description": "Upsell 1 principal VIP Surebet",
+        "kind": "upsell_1",
+    },
+    "upsell_1_secondary": {
+        "label": "🎯 Upsell 1 Alternativo",
+        "price": 19.90,
+        "price_text": "R$ 19.90",
+        "duration_days": 30,
+        "description": "Upsell 1 alternativo VIP Surebet",
+        "kind": "upsell_1",
+    },
+    "upsell_2_primary": {
+        "label": "🚀 Upsell 2 Principal",
+        "price": 39.90,
+        "price_text": "R$ 39.90",
+        "duration_days": None,
+        "description": "Upsell 2 principal VIP Surebet",
+        "kind": "upsell_2",
+    },
+    "upsell_2_secondary": {
+        "label": "💼 Upsell 2 Alternativo",
+        "price": 24.90,
+        "price_text": "R$ 24.90",
+        "duration_days": 30,
+        "description": "Upsell 2 alternativo VIP Surebet",
+        "kind": "upsell_2",
+    },
 }
 
 TELEGRAM_TOKEN = (
@@ -189,6 +221,18 @@ Liberamos uma condição melhor para sua entrada no VIP.
 
 Se quiser aproveitar o menor valor disponível agora, escolha uma das opções abaixo 👇"""
 
+UPSELL_1_TEXT = """🔼 ESPAÇO RESERVADO PARA UPSELL 1
+
+Preencha este bloco com a copy do seu primeiro upsell.
+
+Quando quiser ativar, basta ajustar os textos e preços abaixo 👇"""
+
+UPSELL_2_TEXT = """🔼 ESPAÇO RESERVADO PARA UPSELL 2
+
+Preencha este bloco com a copy do seu segundo upsell.
+
+Quando quiser ativar, basta ajustar os textos e preços abaixo 👇"""
+
 CALLBACK_SUREBET = "surebet_info"
 CALLBACK_CALC = "surebet_calc"
 CALLBACK_ENTRIES = "surebet_entries"
@@ -198,6 +242,10 @@ CALLBACK_MENU = "back_to_menu"
 CALLBACK_DOWNSELL = "vip_downsell"
 CALLBACK_PLAN_PREFIX = "vip_plan:"
 CALLBACK_DOWNSELL_PLAN_PREFIX = "vip_downsell_plan:"
+CALLBACK_UPSELL_1 = "vip_upsell_1"
+CALLBACK_UPSELL_2 = "vip_upsell_2"
+CALLBACK_UPSELL_1_PLAN_PREFIX = "vip_upsell_1_plan:"
+CALLBACK_UPSELL_2_PLAN_PREFIX = "vip_upsell_2_plan:"
 
 app = Flask(__name__)
 
@@ -289,6 +337,29 @@ def downsell_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(PLANS["week_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "week_downsell")],
             [InlineKeyboardButton(PLANS["lifetime_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "lifetime_downsell")],
             [InlineKeyboardButton(PLANS["lifetime_secret_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "lifetime_secret_downsell")],
+            [InlineKeyboardButton("🔼 Abrir Upsell 1", callback_data=CALLBACK_UPSELL_1)],
+            [InlineKeyboardButton("🔼 Abrir Upsell 2", callback_data=CALLBACK_UPSELL_2)],
+            [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
+        ]
+    )
+
+
+def upsell_1_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(PLANS["upsell_1_primary"]["label"] + " por " + PLANS["upsell_1_primary"]["price_text"], callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_primary")],
+            [InlineKeyboardButton(PLANS["upsell_1_secondary"]["label"] + " por " + PLANS["upsell_1_secondary"]["price_text"], callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_secondary")],
+            [InlineKeyboardButton("🔼 Ir para Upsell 2", callback_data=CALLBACK_UPSELL_2)],
+            [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
+        ]
+    )
+
+
+def upsell_2_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(PLANS["upsell_2_primary"]["label"] + " por " + PLANS["upsell_2_primary"]["price_text"], callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_primary")],
+            [InlineKeyboardButton(PLANS["upsell_2_secondary"]["label"] + " por " + PLANS["upsell_2_secondary"]["price_text"], callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_secondary")],
             [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
         ]
     )
@@ -1134,6 +1205,18 @@ async def create_charge_for_plan(
     )
 
 
+async def show_offer_stage(update: Update, text: str, reply_markup: InlineKeyboardMarkup) -> None:
+    query = update.callback_query
+    if query is None:
+        return
+    await safe_answer_callback(query)
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup)
+    except TelegramError:
+        if query.message:
+            await query.message.reply_text(text, reply_markup=reply_markup)
+
+
 async def assinar_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await show_subscription_offer(update, context, via_callback=False)
 
@@ -1197,22 +1280,29 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data.startswith(CALLBACK_PLAN_PREFIX):
-        await safe_answer_callback(query)
-        try:
-            await query.edit_message_text(
-                DOWSELL_TEXT,
-                reply_markup=downsell_keyboard(),
-            )
-        except TelegramError:
-            if query.message:
-                await query.message.reply_text(
-                    DOWSELL_TEXT,
-                    reply_markup=downsell_keyboard(),
-                )
+        await show_offer_stage(update, DOWSELL_TEXT, downsell_keyboard())
         return
 
     if data.startswith(CALLBACK_DOWNSELL_PLAN_PREFIX):
         plan_code = data[len(CALLBACK_DOWNSELL_PLAN_PREFIX):]
+        await create_charge_for_plan(update, context, plan_code)
+        return
+
+    if data == CALLBACK_UPSELL_1:
+        await show_offer_stage(update, UPSELL_1_TEXT, upsell_1_keyboard())
+        return
+
+    if data == CALLBACK_UPSELL_2:
+        await show_offer_stage(update, UPSELL_2_TEXT, upsell_2_keyboard())
+        return
+
+    if data.startswith(CALLBACK_UPSELL_1_PLAN_PREFIX):
+        plan_code = data[len(CALLBACK_UPSELL_1_PLAN_PREFIX):]
+        await create_charge_for_plan(update, context, plan_code)
+        return
+
+    if data.startswith(CALLBACK_UPSELL_2_PLAN_PREFIX):
+        plan_code = data[len(CALLBACK_UPSELL_2_PLAN_PREFIX):]
         await create_charge_for_plan(update, context, plan_code)
         return
 
