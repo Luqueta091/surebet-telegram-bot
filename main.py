@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import pprint
 import secrets
 import sqlite3
 import threading
@@ -59,6 +60,9 @@ FUNNEL_EDITOR_PASSWORD = os.environ.get("FUNNEL_EDITOR_PASSWORD", "").strip()
 INITIAL_FOLLOWUP_DELAY = timedelta(minutes=20)
 REPEATED_DOWNSELL_DELAY = timedelta(minutes=30)
 FUNNEL_START_TEXT = "Clique em INICIAR para ver a oferta disponível."
+MAIN_FILE_PATH = Path(__file__).resolve()
+FUNNEL_CONFIG_START_MARKER = "# === FUNNEL_CONFIG_START ==="
+FUNNEL_CONFIG_END_MARKER = "# === FUNNEL_CONFIG_END ==="
 
 DEFAULT_PLANS: dict[str, dict[str, Any]] = {
     "week_offer": {
@@ -145,6 +149,213 @@ DEFAULT_FUNNEL_TEXTS = {
     "upsell_1_text": "Configure aqui o texto do upsell 1 no editor do funil.",
     "upsell_2_text": "Configure aqui o texto do upsell 2 no editor do funil.",
 }
+# === FUNNEL_CONFIG_START ===
+EMBEDDED_FUNNEL_CONFIG: dict[str, Any] = {'texts': {'vip_funnel_text': '⬆️ VEJA COMO É O VIP POR DENTRO \r\n'
+                              'DIVIDIDO EM TÓPICOS PARA VOCÊ 🔴\r\n'
+                              '\r\n'
+                              '\u200b😍 '
+                              'О\u200b\u200b\u200b\u200b\u200b\u200b\u200bn\u200b\u200b\u200b\u200b\u200b\u200b\u200bl\u200b\u200b\u200b\u200b\u200b\u200b\u200bу\u200b\u200b\u200b\u200b\u200b\u200b\u200bF\u200b\u200b\u200b\u200b\u200b\u200b\u200bа\u200b\u200b\u200b\u200b\u200b\u200b\u200bn\u200b\u200b\u200b\u200b\u200b\u200b\u200bѕ\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b🔴 '
+                              '\u200bV\u200b\u200b\u200b\u200b\u200b\u200b\u200bі\u200b\u200b\u200b\u200b\u200b\u200b\u200bd\u200b\u200b\u200b\u200b\u200b\u200b\u200bе\u200b\u200b\u200b\u200b\u200b\u200b\u200bо\u200b\u200b\u200b\u200b\u200b\u200b\u200bѕ\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200br\u200b\u200b\u200b\u200b\u200b\u200b\u200bа\u200b\u200b\u200b\u200b\u200b\u200b\u200br\u200b\u200b\u200b\u200b\u200b\u200b\u200bо\u200b\u200b\u200b\u200b\u200b\u200b\u200bѕ\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\r\n'
+                              '😈\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200bР\u200b\u200b\u200b\u200b\u200b\u200b\u200br\u200b\u200b\u200b\u200b\u200b\u200b\u200bі\u200b\u200b\u200b\u200b\u200b\u200b\u200bv\u200b\u200b\u200b\u200b\u200b\u200b\u200bа\u200b\u200b\u200b\u200b\u200b\u200b\u200bс\u200b\u200b\u200b\u200b\u200b\u200b\u200bу\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b🌟 '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200bL\u200b\u200b\u200b\u200b\u200b\u200b\u200bі\u200b\u200b\u200b\u200b\u200b\u200b\u200bv\u200b\u200b\u200b\u200b\u200b\u200b\u200bе\u200b\u200b\u200b\u200b\u200b\u200b\u200bѕ\u200b\u200b\u200b\u200b\u200b\u200b\u200b⁺\u200b\u200b\u200b\u200b\u200b\u200b\u200b¹\u200b\u200b\u200b\u200b\u200b\u200b\u200b⁸\u200b\u200b\u200b\u200b\u200b\u200b\u200b\r\n'
+                              '🌈\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bΝ\u200b\u200b\u200b\u200b\u200b\u200b\u200bо\u200b\u200b\u200b\u200b\u200b\u200b\u200bv\u200b\u200b\u200b\u200b\u200b\u200b\u200bі\u200b\u200b\u200b\u200b\u200b\u200b\u200bn\u200b\u200b\u200b\u200b\u200b\u200b\u200bh\u200b\u200b\u200b\u200b\u200b\u200b\u200bа\u200b\u200b\u200b\u200b\u200b\u200b\u200bѕ\u200b\u200b\u200b\u200b\u200b\u200b\u200b⁺\u200b\u200b\u200b\u200b\u200b\u200b\u200b¹\u200b\u200b\u200b\u200b\u200b\u200b\u200b⁸\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b️\u200b\u200b\u200b❤️ '
+                              '\u200b\u200b\u200bС\u200b\u200b\u200b\u200b\u200b\u200b\u200bl\u200b\u200b\u200b\u200b\u200b\u200b\u200bо\u200b\u200b\u200b\u200b\u200b\u200b\u200bѕ\u200b\u200b\u200b\u200b\u200b\u200b\u200bе\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200bF\u200b\u200b\u200b\u200b\u200b\u200b\u200br\u200b\u200b\u200b\u200b\u200b\u200b\u200bі\u200b\u200b\u200b\u200b\u200b\u200b\u200bе\u200b\u200b\u200b\u200b\u200b\u200b\u200bn\u200b\u200b\u200b\u200b\u200b\u200b\u200bd\u200b\u200b\u200b\u200b\u200b\u200b\u200bѕ\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b\r\n'
+                              '👀\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200bI\u200b\u200b\u200b\u200b\u200b\u200b\u200bn\u200b\u200b\u200b\u200b\u200b\u200b\u200bс\u200b\u200b\u200b\u200b\u200b\u200b\u200b3\u200b\u200b\u200b\u200b\u200b\u200b\u200bѕ\u200b\u200b\u200b\u200b\u200b\u200b\u200bt\u200b\u200b\u200b\u200b\u200b\u200b\u200b0\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b🥵\u200bЕ\u200b\u200b\u200b\u200b\u200b\u200b\u200bm\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200bР\u200b\u200b\u200b\u200b\u200b\u200b\u200bú\u200b\u200b\u200b\u200b\u200b\u200b\u200bb\u200b\u200b\u200b\u200b\u200b\u200b\u200bl\u200b\u200b\u200b\u200b\u200b\u200b\u200bі\u200b\u200b\u200b\u200b\u200b\u200b\u200bс\u200b\u200b\u200b\u200b\u200b\u200b\u200bо\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\r\n'
+                              '💕\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200bF\u200b\u200b\u200b\u200b\u200b\u200b\u200bе\u200b\u200b\u200b\u200b\u200b\u200b\u200bt\u200b\u200b\u200b\u200b\u200b\u200b\u200bі\u200b\u200b\u200b\u200b\u200b\u200b\u200bс\u200b\u200b\u200b\u200b\u200b\u200b\u200bh\u200b\u200b\u200b\u200b\u200b\u200b\u200bе\u200b\u200b\u200b\u200b\u200b\u200b\u200bѕ\u200b\u200b\u200b\u200b\u200b\u200b\u200b.\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b🌈 '
+                              '\u200b\u200b\u200bА\u200b\u200b\u200b\u200b\u200b\u200b\u200bm\u200b\u200b\u200b\u200b\u200b\u200b\u200bа\u200b\u200b\u200b\u200b\u200b\u200b\u200bd\u200b\u200b\u200b\u200b\u200b\u200b\u200bо\u200b\u200b\u200b\u200b\u200b\u200b\u200br\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\r\n'
+                              '💋\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200bМ\u200b\u200b\u200b\u200b\u200b\u200b\u200bі\u200b\u200b\u200b\u200b\u200b\u200b\u200bl\u200b\u200b\u200b\u200b\u200b\u200b\u200bf\u200b\u200b\u200b\u200b\u200b\u200b\u200bѕ\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b🔞\u200bPR\u200b\u200b01B1D1NH0s¹\u200b\u200b\u200b\u200b\u200b\u200b\u200b⁸\u200b\u200b\u200b\u200b\u200b\u200b\u200b\r\n'
+                              '\U0001fae3\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bF\u200b4\u200bМ\u200b1\u200bl\u200b1\u200bа\u200b '
+                              '\u200bЅ\u200b4\u200bс\u200b4\u200bn\u200bа\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\u200b\u200b\u200b\u200b👅 '
+                              '\u200b\u200b\u200bО\u200b\u200b\u200b\u200b\u200b\u200b\u200bс\u200b\u200b\u200b\u200b\u200b\u200b\u200bu\u200b\u200b\u200b\u200b\u200b\u200b\u200bt\u200b\u200b\u200b\u200b\u200b\u200b\u200bо\u200b\u200b\u200b\u200b\u200b\u200b\u200bѕ\u200b\u200b\u200b\u200b\u200b\u200b\u200b⁺\u200b\u200b\u200b\u200b\u200b\u200b\u200b¹\u200b\u200b\u200b⁸\u200b\r\n'
+                              '😡\u200b \u200bF\u200bа\u200bv\u200bе\u200bl\u200badа\u200bѕ\u200b '
+                              '\u200b \u200b \u200b 🔥\u200b '
+                              '\u200b\u200b\u200bΚ\u200b\u200b\u200bА\u200b\u200b\u200bМ\u200b\u200b\u200b1\u200b\u200b\u200bL\u200b\u200b\u200bI\u200b\u200b\u200bΝ\u200b\u200b\u200bН\u200b\u200b\u200b4\u200b\r\n'
+                              '🙈\u200b '
+                              '\u200bЅ\u200b\u200b\u200bе\u200b\u200b\u200bх\u200b\u200b\u200bо\u200b '
+                              '\u200bn\u200bа\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bf\u200b\u200b\u200bа\u200b\u200b\u200bс\u200b\u200b\u200bu\u200b\u200b\u200bl\u200b\u200b\u200bd\u200b\u200b\u200bа\u200b\u200b\u200bd\u200b\u200b\u200bе\u200b⁺\u200b\u200b\u200b\u200b\u200b\u200b\u200b¹\u200b\u200b\u200b\u200b\u200b\u200b\u200b⁸\u200b\r\n'
+                              '🌈 '
+                              '\u200bU\u200bn\u200b1\u200bv\u200bе\u200br\u200bѕ\u200b!\u200bt\u200b4\u200br\u200b1\u200bа\u200bѕ\u200b '
+                              '\u200bV\u200b4\u200bz\u200bа\u200bd\u200b4\u200bѕ¹\u200b\u200b\u200b⁸\r\n'
+                              '\r\n'
+                              '🗂 \u200b+\u200b '
+                              '\u200b\u200b2\u200b\u200b\u200b0\u200b\u200b\u200b7\u200b\u200b\u200b.\u200b\u200b\u200b6\u200b\u200b\u200b2\u200b\u200b\u200b9\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bm\u200b\u200b\u200bí\u200b\u200b\u200bd\u200b\u200b\u200bі\u200b\u200b\u200bа\u200b\u200b\u200bѕ\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bn\u200b\u200b\u200bо\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bn\u200b\u200b\u200bо\u200b\u200b\u200bѕ\u200b\u200b\u200bѕ\u200b\u200b\u200bо\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bV\u200b\u200b\u200bI\u200b\u200b\u200bР\u200b\u200b\u200b '
+                              '\u200b\u200b\u200b\r\n'
+                              '🔴 \u200b+\u200b '
+                              '\u200b\u200b\u200b3\u200b\u200b\u200b1\u200b\u200b\u200b.\u200b\u200b\u200b7\u200b\u200b\u200b3\u200b\u200b\u200b5\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bm\u200b\u200b\u200bí\u200b\u200b\u200bd\u200b\u200b\u200bі\u200b\u200b\u200bа\u200b\u200b\u200bѕ\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bО\u200b\u200b\u200bС\u200b\u200b\u200bU\u200b\u200b\u200bL\u200b\u200b\u200bТ\u200b\u200b\u200bА\u200b\u200b\u200bЅ\r\n'
+                              '😈 + \u200b6\u200b \u200bG\u200br\u200bu\u200bр\u200bо\u200bѕ\u200b '
+                              '\u200bѕ\u200bе\u200bс\u200br\u200bе\u200bt\u200bо\u200bѕ\r\n'
+                              '\r\n'
+                              '\u200b⚠️ ѕ\u200b\u200b\u200bu\u200b\u200b\u200bа\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bg\u200b\u200b\u200bо\u200b\u200b\u200bz\u200b\u200b\u200bа\u200b\u200b\u200bd\u200b\u200b\u200bа\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bg\u200b\u200b\u200bа\u200b\u200b\u200br\u200b\u200b\u200bа\u200b\u200b\u200bn\u200b\u200b\u200bt\u200b\u200b\u200bі\u200b\u200b\u200bd\u200b\u200b\u200bа\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bо\u200b\u200b\u200bu\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bѕ\u200b\u200b\u200bе\u200b\u200b\u200bu\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bd\u200b\u200b\u200bі\u200b\u200b\u200bn\u200b\u200b\u200bh\u200b\u200b\u200bе\u200b\u200b\u200bі\u200b\u200b\u200br\u200b\u200b\u200bо\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bd\u200b\u200b\u200bе\u200b\u200b\u200b '
+                              '\u200b\u200b\u200bv\u200b\u200b\u200bо\u200b\u200b\u200bl\u200b\u200b\u200bt\u200b\u200b\u200bа! '
+                              '⏱️\r\n'
+                              '\r\n'
+                              '🚀 𝐀𝐜𝐞𝐬𝐬𝐨 𝐢𝐦𝐞𝐝𝐢𝐚𝐭𝐨!\r\n'
+                              '⏱️ 𝗣𝗥𝗢𝗠𝗢𝗖̧𝗔̃𝗢 𝗘𝗡𝗖𝗘𝗥𝗥𝗔 𝗘𝗠 𝟲 𝗠𝗜𝗡𝗨𝗧𝗢𝗦!\r\n'
+                              '💥(9 𝘃𝗮𝗴𝗮𝘀 𝗿𝗲𝘀𝘁𝗮𝗻𝘁𝗲𝘀)💥\r\n'
+                              '\r\n'
+                              '⚠️ Esta conversa pode sumir em alguns minutos! ⏱️\r\n'
+                              '\r\n'
+                              '                    ⬇️ ᴇɴᴛʀᴀ ᴀɢᴏʀᴀ ⬇️',
+           'downsell_text': '20 ѕеgundоѕ Ехсluímоѕ ѕе nãо еntrаr vосê fіса dе fоrа dа МЕGА '
+                            'РRОМОÇÃО ✅\r\n'
+                            '\r\n'
+                            '👑 𝐈𝐍𝐂3𝐒𝐓0 𝐅𝐀𝐌𝐈𝐋𝐈𝐀𝐑👑   , É о mаіоr саnаl dе IΝС3ЅТ0 🤒 dо tеlеgrаm✈️ '
+                            'соm muіtаѕ mídіаѕ dе ѕехо еm fаmílіа 🔞 \r\n'
+                            '\r\n'
+                            '📂  𝐈𝐑𝐌𝐀\u200c𝐎 𝐂𝐎𝐌𝐄𝐍𝐃𝐎 𝐈𝐑𝐌𝐀\u200c 🔥\r\n'
+                            '📂  𝐓𝐈𝐎 𝐂𝐎𝐌𝐄𝐍𝐃𝐎 𝐒𝐎𝐁𝐑𝐈𝐍𝐇𝐀\r\n'
+                            '📂  𝐒𝐎𝐁𝐑𝐈𝐍𝐇𝐀𝐒 𝐏𝐔𝐓𝐈𝐍𝐇𝐀𝐒  🔥\r\n'
+                            '📂  𝐏𝐑𝐈𝐌𝐀𝐒 𝐕𝐈𝐂𝐈𝐀𝐃𝐀𝐒 𝐄𝐌 𝐒𝐄𝐗𝐎\r\n'
+                            '📂  𝐑𝐄𝐀𝐋 𝐅𝐀𝐌𝐈𝐋𝐘 𝐒𝐄𝐗 🔥🔥\r\n'
+                            '\r\n'
+                            'Gаrаntа ѕuа vаgа аquі: ↙️\r\n'
+                            '\r\n'
+                            '💎VIР ЕМ РRОМОÇÃО💎\r\n'
+                            '\r\n'
+                            '👇 Сlіquе аbаіхо раrа реgаr а рrоmоçãо 👇',
+           'upsell_1_text': '🔼 ESPAÇO RESERVADO PARA UPSELL 1\r\n'
+                            '\r\n'
+                            'Preencha este bloco com a copy do seu primeiro upsell.\r\n'
+                            '\r\n'
+                            'Quando quiser ativar, basta ajustar os textos e preços abaixo 👇',
+           'upsell_2_text': '🔼 ESPAÇO RESERVADO PARA UPSELL 2\r\n'
+                            '\r\n'
+                            'Preencha este bloco com a copy do seu segundo upsell.\r\n'
+                            '\r\n'
+                            'Quando quiser ativar, basta ajustar os textos e preços abaixo 👇'},
+ 'plans': {'week_offer': {'label': '⭐ 1 Semana 30% OFF ⭐',
+                          'price': 6.02,
+                          'price_text': 'R$ 6.02',
+                          'duration_days': 7,
+                          'description': 'Assinatura semanal VIP',
+                          'kind': 'initial'},
+           'lifetime_offer': {'label': '🔥 VIP Vitalício 🔥',
+                              'price': 14.99,
+                              'price_text': 'R$ 14.99',
+                              'duration_days': None,
+                              'description': 'Assinatura vitalícia VIP',
+                              'kind': 'initial'},
+           'lifetime_secret_offer': {'label': '🌸Vitalício + Pastas Secretas',
+                                     'price': 22.89,
+                                     'price_text': 'R$ 22.89',
+                                     'duration_days': None,
+                                     'description': 'Assinatura vitalícia VIP + materiais extras',
+                                     'kind': 'initial'},
+           'week_downsell': {'label': '⭐ 1 Semana 30% OFF ⭐ por R$ 5.72 ',
+                             'price': 5.72,
+                             'price_text': 'R$ 5.72',
+                             'duration_days': 7,
+                             'description': 'Assinatura semanal VIP - downsell',
+                             'kind': 'downsell'},
+           'lifetime_downsell': {'label': '🔥 VIP Vitalício 🔥 por R$ 14.24 (5% OFF)',
+                                 'price': 14.24,
+                                 'price_text': 'R$ 14.24',
+                                 'duration_days': None,
+                                 'description': 'Assinatura vitalícia VIP   - downsell',
+                                 'kind': 'downsell'},
+           'lifetime_secret_downsell': {'label': '🌸Vitalício + Pastas Secretas',
+                                        'price': 21.75,
+                                        'price_text': 'R$ 21.75',
+                                        'duration_days': None,
+                                        'description': 'Assinatura vitalícia VIP   + materiais '
+                                                       'extras - downsell',
+                                        'kind': 'downsell'},
+           'upsell_1_primary': {'label': '🔞LIVES BANIDAS🔥   😈Não perca ao acesso das Lives mais '
+                                         'exclusivas do Brasil! 🇧🇷   📁SEAPARADAS POR PASTAS, TUDO '
+                                         'ORGANIZADO!📁  💎CONTEÚDOS ATUALIZADOS DIARIAMENTE.. '
+                                         '2026    🔥APENAS HOJE→ ACESSO VIP PERMANENTE por apenas  '
+                                         'R$4,99 no PIX 🔥  👇🏻CLIQUE NO BOTÃO ABAIXO E GARANTA JÁ '
+                                         'SEU VIP🔞',
+                                'price': 4.99,
+                                'price_text': '',
+                                'duration_days': None,
+                                'description': 'Upsell 1 principal VIP',
+                                'kind': 'upsell_1'},
+           'upsell_2_primary': {'label': '☎️Ligação Perdida    🔞 𝐒𝐔𝐀 𝐆0𝐙4𝐃4 𝐆𝐀𝐑𝐀𝐍𝐓𝐈𝐃𝐀 𝐎𝐔 𝐒𝐄𝐔 '
+                                         '𝐃𝐈𝐍𝐇𝐄𝐈𝐑𝐎 𝐃𝐄 𝐕𝐎𝐋𝐓𝐀 ❤️\u200d🔥  🔥 𝙎𝙚𝙥𝙖𝙧𝙖𝙙𝙤𝙨 𝙥𝙤𝙧 '
+                                         '𝙘𝙖𝙩𝙚𝙜𝙤𝙧𝙞𝙖:   📁𝗩𝗮𝘇𝗮𝗱¡𝗻𝗵𝗼𝘀 𝗱𝗲 𝗡𝗼𝘃¡𝗻𝗵𝗮𝘀 𝗱𝗼 𝗧𝗶𝗸𝗧𝗼𝗸 𝗲 '
+                                         '𝗜𝗻𝘀𝘁𝗮𝗴𝗿𝗮𝗺  🔞 𝐍𝐨𝐯𝐢𝐧𝐡𝐚𝐬⁺¹⁸ 𝐜𝐡𝐨𝐫𝐚𝐧𝐝𝐨 𝐧𝐚 𝐫𝐨𝐥𝐚 🩸𝐍𝐨𝐯𝐢𝐧𝐡𝐚⁺¹⁸ '
+                                         '𝐩𝐞𝐫𝐝𝐞𝐧𝐝𝐨 𝐨 𝐜𝐚𝐛𝟒𝐜𝟎 🔞 𝐈𝐧𝐜𝟑𝐬𝐭𝐨⁺¹⁸ 𝐒𝐞𝐜𝐫𝟑𝐭𝟎 𝐫𝐞𝐚𝐥 👙 𝐏𝟒𝐢 '
+                                         '𝐜𝐨𝐦𝟑𝐧𝐝𝐨 𝐟𝟏𝐥𝐡𝐚⁺¹⁸  🔞 𝐎𝐜𝐮𝐥𝐭𝐨𝐬 𝐛𝐫𝐮𝐭𝐚𝐥 🔞 𝐕𝐚𝐳𝟒𝐝𝟎𝐬 𝐒𝟑𝐜𝐫𝐞𝐭𝟎𝐬⁺¹⁸ '
+                                         '😈𝐕𝐢́𝐝𝐞𝐨𝐬 𝐛𝐚𝐧𝐢𝐝𝐨𝐬 𝐞𝐦 𝟕 𝐩𝐚𝐢́𝐬𝐞𝐬 🎁 𝐂𝐨𝐦𝐩𝐫𝐞 𝐮𝐦 𝐩𝐥𝐚𝐧𝐨 𝐡𝐨𝐣𝐞 𝐞 '
+                                         '𝐠𝐚𝐧𝐡𝐞 5 𝐠𝐫𝐮𝐩𝐨𝐬 𝐒𝐄𝐂𝐑𝟑𝐓𝟎𝐒 🔐🔥  🚀 𝐀𝐜𝐞𝐬𝐬𝐨 𝐢𝐦𝐞𝐝𝐢𝐚𝐭𝐨 🔒 𝐂𝐨𝐦𝐩𝐫𝐚 '
+                                         '𝟏𝟎𝟎% 𝐚𝐧ô𝐧𝐢𝐦𝐚 ♾️ 𝐕𝐢𝐭𝐚𝐥í𝐜𝐢𝐨 𝐫𝐞𝐚𝐥 💬 𝐒𝐮𝐩𝐨𝐫𝐭𝐞 𝟐𝟒𝐡 𝐧𝐨 𝐓𝐞𝐥𝐞𝐠𝐫𝐚𝐦 '
+                                         '🗓 𝐏𝐫𝐨𝐦𝐨çã𝐨 𝐞𝐧𝐜𝐞𝐫𝐫𝐚 𝐞𝐦 𝟓 𝐌𝐈𝐍𝐔𝐓𝐎𝐒!  ⌛️ 5 𝗩𝗔𝗚𝗔𝗦 𝗖𝗢𝗠 '
+                                         '𝗗𝗘𝗦𝗖𝗢𝗡𝗧𝗢 DE 4,65 𝗣𝗢𝗥 𝗧𝗘𝗠𝗣𝗢 𝗟𝗜𝗠𝗜𝗧𝗔𝗗𝗢 ⬇️',
+                                'price': 39.9,
+                                'price_text': '',
+                                'duration_days': None,
+                                'description': 'Upsell 2 principal VIP  ',
+                                'kind': 'upsell_2'}},
+ 'videos': {'vip_funnel_video': 'vip_funnel_video.mp4',
+            'downsell_video': 'downsell_video.mp4',
+            'upsell_1_video': 'upsell_1_video.mp4',
+            'upsell_2_video': 'upsell_2_video.mp4'}}
+# === FUNNEL_CONFIG_END ===
+
 FUNNEL_VIDEO_KEYS = {
     "vip_funnel_video": "Vídeo da oferta inicial",
     "downsell_video": "Vídeo do downsell",
@@ -238,6 +449,8 @@ def start_funnel_keyboard() -> InlineKeyboardMarkup:
 
 
 def load_funnel_config() -> dict[str, Any]:
+    if isinstance(EMBEDDED_FUNNEL_CONFIG, dict) and EMBEDDED_FUNNEL_CONFIG:
+        return EMBEDDED_FUNNEL_CONFIG
     if not FUNNEL_CONFIG_PATH.exists():
         return {}
     try:
@@ -250,9 +463,27 @@ def load_funnel_config() -> dict[str, Any]:
 
 
 def save_funnel_config(config: dict[str, Any]) -> None:
-    FUNNEL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with FUNNEL_CONFIG_PATH.open("w", encoding="utf-8") as file:
-        json.dump(config, file, ensure_ascii=False, indent=2)
+    global EMBEDDED_FUNNEL_CONFIG
+
+    source = MAIN_FILE_PATH.read_text(encoding="utf-8")
+    start_index = source.find(f"{FUNNEL_CONFIG_START_MARKER}\nEMBEDDED_FUNNEL_CONFIG")
+    end_index = source.find(FUNNEL_CONFIG_END_MARKER, start_index if start_index != -1 else 0)
+    if start_index == -1 or end_index == -1 or end_index <= start_index:
+        raise RuntimeError("Marcadores de configuração do funil não encontrados no main.py.")
+
+    rendered_config = pprint.pformat(config, sort_dicts=False, width=100)
+    replacement = (
+        f"{FUNNEL_CONFIG_START_MARKER}\n"
+        f"EMBEDDED_FUNNEL_CONFIG: dict[str, Any] = {rendered_config}\n"
+        f"{FUNNEL_CONFIG_END_MARKER}"
+    )
+    updated_source = (
+        source[:start_index]
+        + replacement
+        + source[end_index + len(FUNNEL_CONFIG_END_MARKER):]
+    )
+    MAIN_FILE_PATH.write_text(updated_source, encoding="utf-8")
+    EMBEDDED_FUNNEL_CONFIG = config
 
 
 def current_plans() -> dict[str, dict[str, Any]]:
@@ -1964,6 +2195,7 @@ def funnel_editor_save() -> Any:
 def funnel_editor_reset() -> Any:
     if not funnel_editor_authorized():
         return redirect(url_for("funnel_editor"))
+    save_funnel_config({})
     if FUNNEL_CONFIG_PATH.exists():
         FUNNEL_CONFIG_PATH.unlink()
     return redirect(url_for("funnel_editor", saved=1))
