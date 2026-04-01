@@ -18,7 +18,7 @@ import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from flask import Flask, redirect, render_template_string, request, session, url_for
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
 from telegram.ext import (
     Application,
@@ -59,7 +59,6 @@ FUNNEL_CONFIG_PATH = Path(
 FUNNEL_EDITOR_PASSWORD = os.environ.get("FUNNEL_EDITOR_PASSWORD", "").strip()
 INITIAL_FOLLOWUP_DELAY = timedelta(minutes=20)
 REPEATED_DOWNSELL_DELAY = timedelta(minutes=30)
-FUNNEL_START_TEXT = "Clique em INICIAR para ver a oferta disponível."
 MAIN_FILE_PATH = Path(__file__).resolve()
 FUNNEL_CONFIG_START_MARKER = "# === FUNNEL_CONFIG_START ==="
 FUNNEL_CONFIG_END_MARKER = "# === FUNNEL_CONFIG_END ==="
@@ -342,7 +341,7 @@ EMBEDDED_FUNNEL_CONFIG: dict[str, Any] = {'texts': {'vip_funnel_text': '⬆️ V
                                 'description': 'Upsell 1 principal VIP',
                                 'kind': 'upsell_1'},
            'upsell_2_primary': {'label': '',
-                                'price': 39.9,
+                                'price': 4.65,
                                 'price_text': '',
                                 'duration_days': None,
                                 'description': 'Upsell 2 principal VIP  ',
@@ -439,9 +438,17 @@ def back_to_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def start_funnel_keyboard() -> InlineKeyboardMarkup:
+def pix_payment_keyboard(pix_code: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("INICIAR", callback_data=CALLBACK_SUBSCRIBE)]]
+        [
+            [
+                InlineKeyboardButton(
+                    "📋 Copiar código PIX",
+                    copy_text=CopyTextButton(text=pix_code),
+                )
+            ],
+            [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
+        ]
     )
 
 
@@ -1208,7 +1215,7 @@ def create_syncpay_charge(
     plan_code: str,
     *,
     base_plan_code: str | None = None,
-) -> str:
+) -> tuple[str, str]:
     webhook_url = notification_webhook_url()
     if not webhook_url:
         raise RuntimeError("WEBHOOK_URL não configurado.")
@@ -1256,16 +1263,17 @@ def create_syncpay_charge(
         else "vitalício"
     )
 
-    return (
+    payment_text = (
         "💳 ASSINAR VIP\n\n"
         f"Plano: {plan['label']}\n"
         f"Valor: {plan['price_text']}\n"
         f"Acesso: {duration_text}\n"
         f"Identificador: {identifier}\n\n"
-        "Use o código PIX copia e cola abaixo para concluir sua assinatura:\n\n"
-        f"{pix_code}\n\n"
+        "Use o botão abaixo para copiar o código PIX limpo e concluir sua assinatura.\n\n"
+        "Evite copiar segurando o texto da mensagem, para não trazer link junto.\n\n"
         "Assim que o pagamento for aprovado, você receberá automaticamente o link exclusivo do grupo VIP."
     )
+    return payment_text, pix_code
 
 
 def extract_syncpay_identifier(payload: dict[str, Any]) -> str:
@@ -1551,22 +1559,7 @@ async def safe_answer_callback(query: Any, text: str | None = None) -> None:
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = update.effective_message
-    if message is None:
-        return
-    await message.reply_text(FUNNEL_START_TEXT, reply_markup=start_funnel_keyboard())
-
-
-async def show_start_menu(update: Update) -> None:
-    query = update.callback_query
-    if query is None:
-        return
-    await safe_answer_callback(query)
-    try:
-        await query.edit_message_text(FUNNEL_START_TEXT, reply_markup=start_funnel_keyboard())
-    except TelegramError:
-        if query.message:
-            await query.message.reply_text(FUNNEL_START_TEXT, reply_markup=start_funnel_keyboard())
+    await show_subscription_offer(update, context, via_callback=False)
 
 
 async def show_subscription_offer(
@@ -1670,7 +1663,7 @@ async def create_charge_for_plan(
     )
 
     try:
-        payment_text = await asyncio.to_thread(
+        payment_text, pix_code = await asyncio.to_thread(
             create_syncpay_charge,
             user.id,
             user.full_name,
@@ -1687,7 +1680,7 @@ async def create_charge_for_plan(
 
     await status_message.edit_text(
         payment_text,
-        reply_markup=back_to_menu_keyboard(),
+        reply_markup=pix_payment_keyboard(pix_code),
     )
 
 
@@ -1746,10 +1739,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     data = query.data
     if data == CALLBACK_MENU:
-        await show_start_menu(update)
-        return
-
-    if data == CALLBACK_SUBSCRIBE:
         await show_subscription_offer(update, context, via_callback=True)
         return
 
