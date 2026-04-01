@@ -588,9 +588,9 @@ def upsell_1_keyboard(base_plan_code: str) -> InlineKeyboardMarkup:
     plans = current_plans()
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(plans["upsell_1_primary"]["label"] + " por " + plans["upsell_1_primary"]["price_text"], callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_primary")],
+            [InlineKeyboardButton(plans["upsell_1_primary"]["label"] + " por " + plans["upsell_1_primary"]["price_text"], callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_primary|" + base_plan_code)],
             [
-                InlineKeyboardButton("✅ ADICIONAR✅", callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_primary"),
+                InlineKeyboardButton("✅ ADICIONAR✅", callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_primary|" + base_plan_code),
                 InlineKeyboardButton("❌ NÃO QUERO❌", callback_data=CALLBACK_CREATE_CHARGE_PREFIX + base_plan_code),
             ],
             [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
@@ -598,13 +598,13 @@ def upsell_1_keyboard(base_plan_code: str) -> InlineKeyboardMarkup:
     )
 
 
-def upsell_2_keyboard() -> InlineKeyboardMarkup:
+def upsell_2_keyboard(base_plan_code: str) -> InlineKeyboardMarkup:
     plans = current_plans()
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton(plans["upsell_2_primary"]["label"] + " por " + plans["upsell_2_primary"]["price_text"], callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_primary")],
+            [InlineKeyboardButton(plans["upsell_2_primary"]["label"] + " por " + plans["upsell_2_primary"]["price_text"], callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_primary|" + base_plan_code)],
             [
-                InlineKeyboardButton("✅ ADICIONAR✅", callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_primary"),
+                InlineKeyboardButton("✅ ADICIONAR✅", callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_primary|" + base_plan_code),
                 InlineKeyboardButton("❌ NÃO QUERO❌", callback_data=CALLBACK_MENU),
             ],
             [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
@@ -841,6 +841,21 @@ def get_due_syncpay_followups(reference_time: datetime) -> list[sqlite3.Row]:
             (reference_time.isoformat(),),
         ).fetchall()
     return list(rows)
+
+
+def get_latest_pending_syncpay_charge_for_user(user_id: int) -> sqlite3.Row | None:
+    with database_connection() as connection:
+        return connection.execute(
+            """
+            SELECT *
+            FROM syncpay_cobrancas
+            WHERE user_id = ?
+              AND status = 'pending'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
 
 
 def update_syncpay_followup_state(
@@ -1209,6 +1224,11 @@ def extract_syncpay_status(source: dict[str, Any] | None) -> str:
     return raw_status
 
 
+def parse_plan_and_base(raw_value: str) -> tuple[str, str | None]:
+    plan_code, separator, base_plan_code = raw_value.partition("|")
+    return plan_code, (base_plan_code or None) if separator else None
+
+
 def create_syncpay_charge(
     user_id: int,
     nome: str,
@@ -1220,12 +1240,28 @@ def create_syncpay_charge(
     if not webhook_url:
         raise RuntimeError("WEBHOOK_URL não configurado.")
     plan = get_plan(plan_code)
+    base_plan = get_plan(base_plan_code) if base_plan_code else None
+    total_amount = float(plan["price"]) + (float(base_plan["price"]) if base_plan is not None else 0.0)
+    display_label = (
+        f"{base_plan['label']} + {plan['label']}"
+        if base_plan is not None
+        else plan["label"]
+    )
+    display_price_text = (
+        f"R$ {total_amount:.2f}"
+        if base_plan is not None
+        else str(plan["price_text"])
+    )
 
     cpf, email, telefone = get_or_create_syncpay_profile(user_id, nome)
 
     payload = {
-        "amount": plan["price"],
-        "description": plan["description"],
+        "amount": total_amount,
+        "description": (
+            f"{base_plan['description']} + {plan['description']}"
+            if base_plan is not None
+            else plan["description"]
+        ),
         "webhook_url": webhook_url,
         "client": {
             "name": nome,
@@ -1251,7 +1287,7 @@ def create_syncpay_charge(
         "pending",
         pix_code,
         plan_code,
-        float(plan["price"]),
+        total_amount,
         base_plan_code=base_plan_code,
     )
     replace_pending_syncpay_charges(user_id, identifier)
@@ -1265,12 +1301,8 @@ def create_syncpay_charge(
 
     payment_text = (
         "💳 ASSINAR VIP\n\n"
-        f"Plano: {plan['label']}\n"
-        f"Valor: {plan['price_text']}\n"
-        f"Acesso: {duration_text}\n"
-        f"Identificador: {identifier}\n\n"
-        "Use o botão abaixo para copiar o código PIX limpo e concluir sua assinatura.\n\n"
-        "Evite copiar segurando o texto da mensagem, para não trazer link junto.\n\n"
+        f"Valor total: {display_price_text}\n\n"
+        "Use o botão abaixo para copiar o código PIX.\n\n"
         "Assim que o pagamento for aprovado, você receberá automaticamente o link exclusivo do grupo VIP."
     )
     return payment_text, pix_code
@@ -1404,13 +1436,16 @@ def process_completed_payment(identifier: str, payload_data: dict[str, Any] | No
 
     user_id = int(charge["user_id"])
     plan_code = str(charge["plan_code"] or "").strip()
+    base_plan_code = str(charge["base_plan_code"] or "").strip()
+    access_plan_code = base_plan_code or plan_code
     try:
         plan = get_plan(plan_code)
+        access_plan = get_plan(access_plan_code)
     except KeyError:
         logger.warning(
             "Cobrança SyncPay %s aprovada sem plano válido (%s).",
             identifier,
-            plan_code,
+            access_plan_code,
         )
         return
     assinante = get_assinante(user_id)
@@ -1422,33 +1457,12 @@ def process_completed_payment(identifier: str, payload_data: dict[str, Any] | No
     )
 
     data_pagamento = current_date()
-    duration_days = plan.get("duration_days")
+    duration_days = access_plan.get("duration_days")
     vencimento = (
         data_pagamento + timedelta(days=int(duration_days))
         if isinstance(duration_days, int)
         else None
     )
-    invite_link = run_telegram_coroutine(create_unique_invite_link(user_id))
-    access_text = (
-        f"Seu acesso ao grupo VIP foi liberado até {vencimento.strftime('%d/%m/%Y')}."
-        if vencimento is not None
-        else "Seu acesso ao grupo VIP foi liberado em modo vitalício."
-    )
-    renewal_text = (
-        "Quando quiser renovar, use /assinar."
-        if vencimento is not None
-        else "Você não precisa renovar."
-    )
-    welcome_text = (
-        "✅ Pagamento aprovado!\n\n"
-        f"Plano: {plan['label']}\n"
-        f"{access_text}\n\n"
-        f"Link exclusivo:\n{invite_link}\n\n"
-        "Esse link aceita apenas 1 entrada.\n"
-        f"{renewal_text}"
-    )
-
-    run_telegram_coroutine(send_private_message(user_id, welcome_text))
     activate_assinante(
         user_id,
         nome,
@@ -1490,7 +1504,9 @@ def process_pending_followups() -> None:
                     send_funnel_stage_message(
                         user_id,
                         current_funnel_text("upsell_2_text"),
-                        upsell_2_keyboard(),
+                        upsell_2_keyboard(
+                            str(latest_charge["base_plan_code"] or latest_charge["plan_code"] or "").strip()
+                        ),
                         video_key="upsell_2_video",
                     )
                 )
@@ -1763,22 +1779,30 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == CALLBACK_UPSELL_2:
+        current_base_plan = None
+        if query.from_user:
+            latest_pending = await asyncio.to_thread(
+                get_latest_pending_syncpay_charge_for_user,
+                query.from_user.id,
+            )
+            if latest_pending is not None and int(latest_pending["user_id"]) == query.from_user.id:
+                current_base_plan = str(latest_pending["base_plan_code"] or latest_pending["plan_code"] or "").strip() or None
         await show_offer_stage(
             update,
             current_funnel_text("upsell_2_text"),
-            upsell_2_keyboard(),
+            upsell_2_keyboard(current_base_plan or "lifetime_offer"),
             video_key="upsell_2_video",
         )
         return
 
     if data.startswith(CALLBACK_UPSELL_1_PLAN_PREFIX):
-        plan_code = data[len(CALLBACK_UPSELL_1_PLAN_PREFIX):]
-        await create_charge_for_plan(update, context, plan_code)
+        plan_code, base_plan_code = parse_plan_and_base(data[len(CALLBACK_UPSELL_1_PLAN_PREFIX):])
+        await create_charge_for_plan(update, context, plan_code, base_plan_code=base_plan_code)
         return
 
     if data.startswith(CALLBACK_UPSELL_2_PLAN_PREFIX):
-        plan_code = data[len(CALLBACK_UPSELL_2_PLAN_PREFIX):]
-        await create_charge_for_plan(update, context, plan_code)
+        plan_code, base_plan_code = parse_plan_and_base(data[len(CALLBACK_UPSELL_2_PLAN_PREFIX):])
+        await create_charge_for_plan(update, context, plan_code, base_plan_code=base_plan_code)
         return
 
     await safe_answer_callback(query, "Opção inválida.")
