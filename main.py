@@ -45,9 +45,59 @@ DATABASE_PATH = Path(
         str(Path(__file__).with_name("assinantes.db")),
     )
 ).expanduser()
-VIP_PRICE = 39.90
-VIP_PRICE_TEXT = "R$39,90"
-VIP_DURATION_DAYS = 30
+DEFAULT_CURRENCY_CODE = "BRL"
+FUNNEL_VIDEO_PATH = Path(__file__).with_name("vids.mp4")
+
+PLANS: dict[str, dict[str, Any]] = {
+    "week_offer": {
+        "label": "⭐ 1 Semana VIP ⭐",
+        "price": 6.02,
+        "price_text": "R$ 6.02",
+        "duration_days": 7,
+        "description": "Assinatura semanal VIP Surebet",
+        "kind": "initial",
+    },
+    "lifetime_offer": {
+        "label": "🔥 VIP Vitalício 🔥",
+        "price": 14.99,
+        "price_text": "R$ 14.99",
+        "duration_days": None,
+        "description": "Assinatura vitalícia VIP Surebet",
+        "kind": "initial",
+    },
+    "lifetime_secret_offer": {
+        "label": "💎 Vitalício + Materiais Extras",
+        "price": 22.89,
+        "price_text": "R$ 22.89",
+        "duration_days": None,
+        "description": "Assinatura vitalícia VIP Surebet + materiais extras",
+        "kind": "initial",
+    },
+    "week_downsell": {
+        "label": "⭐ 1 Semana VIP ⭐ por R$ 5.72 (5% OFF)",
+        "price": 5.72,
+        "price_text": "R$ 5.72",
+        "duration_days": 7,
+        "description": "Assinatura semanal VIP Surebet - downsell",
+        "kind": "downsell",
+    },
+    "lifetime_downsell": {
+        "label": "🔥 VIP Vitalício 🔥 por R$ 14.24 (5% OFF)",
+        "price": 14.24,
+        "price_text": "R$ 14.24",
+        "duration_days": None,
+        "description": "Assinatura vitalícia VIP Surebet - downsell",
+        "kind": "downsell",
+    },
+    "lifetime_secret_downsell": {
+        "label": "💎 Vitalício + Materiais Extras por R$ 21.75 (5% OFF)",
+        "price": 21.75,
+        "price_text": "R$ 21.75",
+        "duration_days": None,
+        "description": "Assinatura vitalícia VIP Surebet + materiais extras - downsell",
+        "kind": "downsell",
+    },
+}
 
 TELEGRAM_TOKEN = (
     os.environ.get("TELEGRAM_TOKEN", "").strip()
@@ -117,12 +167,37 @@ Casas recomendadas:
 
 💡 Tenha pelo menos 3 casas cadastradas."""
 
+VIP_FUNNEL_TEXT = """⬆️ VEJA COMO É O VIP POR DENTRO
+DIVIDIDO EM TÓPICOS PARA VOCÊ 🔴
+
+No VIP você recebe:
+
+✅ Entradas organizadas
+✅ Mais agilidade para executar
+✅ Acesso ao ambiente premium
+✅ Conteúdo direto ao ponto
+✅ Suporte mais próximo
+
+🚀 Acesso imediato
+⏱️ Condição promocional por tempo limitado
+
+Escolha uma opção abaixo para continuar 👇"""
+
+DOWSELL_TEXT = """20 segundos e essa condição pode sair do ar ✅
+
+Liberamos uma condição melhor para sua entrada no VIP.
+
+Se quiser aproveitar o menor valor disponível agora, escolha uma das opções abaixo 👇"""
+
 CALLBACK_SUREBET = "surebet_info"
 CALLBACK_CALC = "surebet_calc"
 CALLBACK_ENTRIES = "surebet_entries"
 CALLBACK_BANKROLL = "surebet_bankroll"
 CALLBACK_SUBSCRIBE = "vip_subscribe"
 CALLBACK_MENU = "back_to_menu"
+CALLBACK_DOWNSELL = "vip_downsell"
+CALLBACK_PLAN_PREFIX = "vip_plan:"
+CALLBACK_DOWNSELL_PLAN_PREFIX = "vip_downsell_plan:"
 
 app = Flask(__name__)
 
@@ -197,6 +272,35 @@ def back_to_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def initial_offer_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(PLANS["week_offer"]["label"] + " por " + PLANS["week_offer"]["price_text"], callback_data=CALLBACK_PLAN_PREFIX + "week_offer")],
+            [InlineKeyboardButton(PLANS["lifetime_offer"]["label"] + " por " + PLANS["lifetime_offer"]["price_text"], callback_data=CALLBACK_PLAN_PREFIX + "lifetime_offer")],
+            [InlineKeyboardButton(PLANS["lifetime_secret_offer"]["label"] + " por " + PLANS["lifetime_secret_offer"]["price_text"], callback_data=CALLBACK_PLAN_PREFIX + "lifetime_secret_offer")],
+            [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
+        ]
+    )
+
+
+def downsell_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(PLANS["week_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "week_downsell")],
+            [InlineKeyboardButton(PLANS["lifetime_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "lifetime_downsell")],
+            [InlineKeyboardButton(PLANS["lifetime_secret_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "lifetime_secret_downsell")],
+            [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
+        ]
+    )
+
+
+def get_plan(plan_code: str) -> dict[str, Any]:
+    plan = PLANS.get(plan_code)
+    if plan is None:
+        raise KeyError(plan_code)
+    return plan
+
+
 def database_connection() -> sqlite3.Connection:
     connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
@@ -217,6 +321,22 @@ def ensure_assinantes_columns(connection: sqlite3.Connection) -> None:
         if column_name not in existing_columns:
             connection.execute(
                 f"ALTER TABLE assinantes ADD COLUMN {column_name} {column_type}"
+            )
+
+
+def ensure_syncpay_charge_columns(connection: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(syncpay_cobrancas)").fetchall()
+    }
+    required_columns = {
+        "plan_code": "TEXT",
+        "amount": "REAL",
+    }
+    for column_name, column_type in required_columns.items():
+        if column_name not in existing_columns:
+            connection.execute(
+                f"ALTER TABLE syncpay_cobrancas ADD COLUMN {column_name} {column_type}"
             )
 
 
@@ -251,11 +371,14 @@ def init_database() -> None:
                 user_id INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 pix_code TEXT NOT NULL,
+                plan_code TEXT,
+                amount REAL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
             """
         )
+        ensure_syncpay_charge_columns(connection)
 
 
 def get_assinante(user_id: int) -> sqlite3.Row | None:
@@ -300,7 +423,7 @@ def save_payment_profile(user_id: int, nome: str, cpf: str, email: str, telefone
         )
 
 
-def activate_assinante(user_id: int, nome: str, data_pagamento: str, vencimento: str) -> None:
+def activate_assinante(user_id: int, nome: str, data_pagamento: str, vencimento: str | None) -> None:
     with database_connection() as connection:
         connection.execute(
             """
@@ -364,20 +487,29 @@ def get_syncpay_charge(identifier: str) -> sqlite3.Row | None:
         ).fetchone()
 
 
-def save_syncpay_charge(identifier: str, user_id: int, status: str, pix_code: str) -> None:
+def save_syncpay_charge(
+    identifier: str,
+    user_id: int,
+    status: str,
+    pix_code: str,
+    plan_code: str,
+    amount: float,
+) -> None:
     timestamp = datetime.now(APP_TIMEZONE).isoformat()
     with database_connection() as connection:
         connection.execute(
             """
-            INSERT INTO syncpay_cobrancas (identifier, user_id, status, pix_code, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO syncpay_cobrancas (identifier, user_id, status, pix_code, plan_code, amount, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(identifier) DO UPDATE SET
                 user_id = excluded.user_id,
                 status = excluded.status,
                 pix_code = excluded.pix_code,
+                plan_code = excluded.plan_code,
+                amount = excluded.amount,
                 updated_at = excluded.updated_at
             """,
-            (identifier, user_id, status, pix_code, timestamp, timestamp),
+            (identifier, user_id, status, pix_code, plan_code, amount, timestamp, timestamp),
         )
 
 
@@ -601,16 +733,18 @@ def fetch_syncpay_transaction(identifier: str) -> dict[str, Any]:
 def create_syncpay_charge(
     user_id: int,
     nome: str,
+    plan_code: str,
 ) -> str:
     webhook_url = notification_webhook_url()
     if not webhook_url:
         raise RuntimeError("WEBHOOK_URL não configurado.")
+    plan = get_plan(plan_code)
 
     cpf, email, telefone = get_or_create_syncpay_profile(user_id, nome)
 
     payload = {
-        "amount": VIP_PRICE,
-        "description": "Assinatura VIP Surebet - 30 dias",
+        "amount": plan["price"],
+        "description": plan["description"],
         "webhook_url": webhook_url,
         "client": {
             "name": nome,
@@ -629,11 +763,20 @@ def create_syncpay_charge(
 
     save_pending_assinante(user_id, nome)
     save_payment_profile(user_id, nome, cpf, email, telefone)
-    save_syncpay_charge(identifier, user_id, "pending", pix_code)
+    save_syncpay_charge(identifier, user_id, "pending", pix_code, plan_code, float(plan["price"]))
+
+    duration_days = plan.get("duration_days")
+    duration_text = (
+        f"{duration_days} dias"
+        if isinstance(duration_days, int)
+        else "vitalício"
+    )
 
     return (
         "💳 ASSINAR VIP\n\n"
-        f"Valor: {VIP_PRICE_TEXT}\n"
+        f"Plano: {plan['label']}\n"
+        f"Valor: {plan['price_text']}\n"
+        f"Acesso: {duration_text}\n"
         f"Identificador: {identifier}\n\n"
         "Use o código PIX copia e cola abaixo para concluir sua assinatura:\n\n"
         f"{pix_code}\n\n"
@@ -743,6 +886,16 @@ def process_completed_payment(identifier: str, payload_data: dict[str, Any] | No
         return
 
     user_id = int(charge["user_id"])
+    plan_code = str(charge["plan_code"] or "").strip()
+    try:
+        plan = get_plan(plan_code)
+    except KeyError:
+        logger.warning(
+            "Cobrança SyncPay %s aprovada sem plano válido (%s).",
+            identifier,
+            plan_code,
+        )
+        return
     assinante = get_assinante(user_id)
     client = data.get("client") if isinstance(data.get("client"), dict) else {}
     nome = (
@@ -752,17 +905,39 @@ def process_completed_payment(identifier: str, payload_data: dict[str, Any] | No
     )
 
     data_pagamento = current_date()
-    vencimento = data_pagamento + timedelta(days=VIP_DURATION_DAYS)
+    duration_days = plan.get("duration_days")
+    vencimento = (
+        data_pagamento + timedelta(days=int(duration_days))
+        if isinstance(duration_days, int)
+        else None
+    )
     invite_link = run_telegram_coroutine(create_unique_invite_link(user_id))
+    access_text = (
+        f"Seu acesso ao grupo VIP foi liberado até {vencimento.strftime('%d/%m/%Y')}."
+        if vencimento is not None
+        else "Seu acesso ao grupo VIP foi liberado em modo vitalício."
+    )
+    renewal_text = (
+        "Quando quiser renovar, use /assinar."
+        if vencimento is not None
+        else "Você não precisa renovar."
+    )
     welcome_text = (
         "✅ Pagamento aprovado!\n\n"
-        "Seu acesso ao grupo VIP foi liberado por 30 dias.\n\n"
+        f"Plano: {plan['label']}\n"
+        f"{access_text}\n\n"
         f"Link exclusivo:\n{invite_link}\n\n"
-        "Esse link aceita apenas 1 entrada. Se precisar renovar depois, use /assinar."
+        "Esse link aceita apenas 1 entrada.\n"
+        f"{renewal_text}"
     )
 
     run_telegram_coroutine(send_private_message(user_id, welcome_text))
-    activate_assinante(user_id, nome, data_pagamento.isoformat(), vencimento.isoformat())
+    activate_assinante(
+        user_id,
+        nome,
+        data_pagamento.isoformat(),
+        vencimento.isoformat() if vencimento is not None else None,
+    )
     mark_payment_processed(identifier, user_id)
     logger.info("Pagamento SyncPay %s aprovado para user_id=%s.", identifier, user_id)
 
@@ -785,7 +960,7 @@ def expire_due_subscribers() -> None:
                 send_private_message(
                     user_id,
                     "⏰ Seu acesso ao grupo VIP venceu hoje.\n\n"
-                    "Para renovar por mais 30 dias, use /assinar.",
+                    "Para renovar, use /assinar.",
                 )
             )
         except Exception as exc:
@@ -844,7 +1019,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await show_main_menu(update, context)
 
 
-async def handle_subscription_request(
+async def show_subscription_offer(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     *,
@@ -856,9 +1031,10 @@ async def handle_subscription_request(
         return
 
     existing = await asyncio.to_thread(get_assinante, user.id)
-    if existing and existing["status"] == "ativo" and existing["vencimento"]:
+    if existing and existing["status"] == "ativo":
+        stored_vencimento = str(existing["vencimento"] or "").strip()
         try:
-            vencimento = datetime.fromisoformat(existing["vencimento"]).date()
+            vencimento = datetime.fromisoformat(stored_vencimento).date() if stored_vencimento else None
         except ValueError:
             vencimento = None
         if vencimento and vencimento >= current_date():
@@ -866,6 +1042,17 @@ async def handle_subscription_request(
                 "✅ Sua assinatura VIP já está ativa.\n\n"
                 f"Vencimento atual: {vencimento.strftime('%d/%m/%Y')}\n\n"
                 "Quando precisar renovar, use /assinar."
+            )
+            if via_callback:
+                await present_callback_text(update, active_text)
+            else:
+                await message.reply_text(active_text, reply_markup=back_to_menu_keyboard())
+            return
+        if not stored_vencimento:
+            active_text = (
+                "✅ Sua assinatura VIP já está ativa.\n\n"
+                "Tipo de acesso: vitalício\n\n"
+                "Você não precisa renovar."
             )
             if via_callback:
                 await present_callback_text(update, active_text)
@@ -885,17 +1072,53 @@ async def handle_subscription_request(
             await message.reply_text(config_text, reply_markup=back_to_menu_keyboard())
         return
 
-    if via_callback and update.callback_query is not None:
+    if via_callback:
+        query = update.callback_query
+        if query is None:
+            return
+        await safe_answer_callback(query)
+
+    if FUNNEL_VIDEO_PATH.exists():
+        with FUNNEL_VIDEO_PATH.open("rb") as video_file:
+            await message.reply_video(
+                video=video_file,
+                caption=VIP_FUNNEL_TEXT,
+                reply_markup=initial_offer_keyboard(),
+            )
+        return
+
+    await message.reply_text(VIP_FUNNEL_TEXT, reply_markup=initial_offer_keyboard())
+
+
+async def create_charge_for_plan(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    plan_code: str,
+) -> None:
+    user = update.effective_user
+    message = update.effective_message
+    if user is None or message is None:
+        return
+
+    try:
+        plan = get_plan(plan_code)
+    except KeyError:
+        if update.callback_query is not None:
+            await safe_answer_callback(update.callback_query, "Plano inválido.")
+        return
+
+    if update.callback_query is not None:
         await safe_answer_callback(update.callback_query)
-        status_message = await message.reply_text("Gerando sua cobrança PIX...")
-    else:
-        status_message = await message.reply_text("Gerando sua cobrança PIX...")
+    status_message = await message.reply_text(
+        f"Gerando sua cobrança PIX para {plan['label']}..."
+    )
 
     try:
         payment_text = await asyncio.to_thread(
             create_syncpay_charge,
             user.id,
             user.full_name,
+            plan_code,
         )
     except Exception as exc:
         logger.exception("Falha ao gerar cobrança PIX na SyncPay: %s", exc)
@@ -912,7 +1135,7 @@ async def handle_subscription_request(
 
 
 async def assinar_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await handle_subscription_request(update, context, via_callback=False)
+    await show_subscription_offer(update, context, via_callback=False)
 
 
 async def group_service_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -970,7 +1193,27 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == CALLBACK_SUBSCRIBE:
-        await handle_subscription_request(update, context, via_callback=True)
+        await show_subscription_offer(update, context, via_callback=True)
+        return
+
+    if data.startswith(CALLBACK_PLAN_PREFIX):
+        await safe_answer_callback(query)
+        try:
+            await query.edit_message_text(
+                DOWSELL_TEXT,
+                reply_markup=downsell_keyboard(),
+            )
+        except TelegramError:
+            if query.message:
+                await query.message.reply_text(
+                    DOWSELL_TEXT,
+                    reply_markup=downsell_keyboard(),
+                )
+        return
+
+    if data.startswith(CALLBACK_DOWNSELL_PLAN_PREFIX):
+        plan_code = data[len(CALLBACK_DOWNSELL_PLAN_PREFIX):]
+        await create_charge_for_plan(update, context, plan_code)
         return
 
     await safe_answer_callback(query, "Opção inválida.")
