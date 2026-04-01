@@ -35,7 +35,7 @@ logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-logger = logging.getLogger("surebet-bot")
+logger = logging.getLogger("telegram-funnel-bot")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
@@ -48,6 +48,7 @@ DATABASE_PATH = Path(
 ).expanduser()
 DEFAULT_CURRENCY_CODE = "BRL"
 FUNNEL_VIDEO_PATH = Path(__file__).with_name("vids.mp4")
+FUNNEL_MEDIA_DIR = Path(__file__).with_name("funnel_media")
 FUNNEL_CONFIG_PATH = Path(
     os.environ.get(
         "FUNNEL_CONFIG_PATH",
@@ -55,54 +56,57 @@ FUNNEL_CONFIG_PATH = Path(
     )
 ).expanduser()
 FUNNEL_EDITOR_PASSWORD = os.environ.get("FUNNEL_EDITOR_PASSWORD", "").strip()
+INITIAL_FOLLOWUP_DELAY = timedelta(minutes=20)
+REPEATED_DOWNSELL_DELAY = timedelta(minutes=30)
+FUNNEL_START_TEXT = "Clique em INICIAR para ver a oferta disponível."
 
 DEFAULT_PLANS: dict[str, dict[str, Any]] = {
     "week_offer": {
-        "label": "⭐ 1 Semana VIP ⭐",
+        "label": "Oferta 1",
         "price": 6.02,
         "price_text": "R$ 6.02",
         "duration_days": 7,
-        "description": "Assinatura semanal VIP Surebet",
+        "description": "Oferta principal 1",
         "kind": "initial",
     },
     "lifetime_offer": {
-        "label": "🔥 VIP Vitalício 🔥",
+        "label": "Oferta 2",
         "price": 14.99,
         "price_text": "R$ 14.99",
         "duration_days": None,
-        "description": "Assinatura vitalícia VIP Surebet",
+        "description": "Oferta principal 2",
         "kind": "initial",
     },
     "lifetime_secret_offer": {
-        "label": "💎 Vitalício + Materiais Extras",
+        "label": "Oferta 3",
         "price": 22.89,
         "price_text": "R$ 22.89",
         "duration_days": None,
-        "description": "Assinatura vitalícia VIP Surebet + materiais extras",
+        "description": "Oferta principal 3",
         "kind": "initial",
     },
     "week_downsell": {
-        "label": "⭐ 1 Semana VIP ⭐ por R$ 5.72 (5% OFF)",
+        "label": "Downsell 1",
         "price": 5.72,
         "price_text": "R$ 5.72",
         "duration_days": 7,
-        "description": "Assinatura semanal VIP Surebet - downsell",
+        "description": "Oferta downsell 1",
         "kind": "downsell",
     },
     "lifetime_downsell": {
-        "label": "🔥 VIP Vitalício 🔥 por R$ 14.24 (5% OFF)",
+        "label": "Downsell 2",
         "price": 14.24,
         "price_text": "R$ 14.24",
         "duration_days": None,
-        "description": "Assinatura vitalícia VIP Surebet - downsell",
+        "description": "Oferta downsell 2",
         "kind": "downsell",
     },
     "lifetime_secret_downsell": {
-        "label": "💎 Vitalício + Materiais Extras por R$ 21.75 (5% OFF)",
+        "label": "Downsell 3",
         "price": 21.75,
         "price_text": "R$ 21.75",
         "duration_days": None,
-        "description": "Assinatura vitalícia VIP Surebet + materiais extras - downsell",
+        "description": "Oferta downsell 3",
         "kind": "downsell",
     },
     "upsell_1_primary": {
@@ -110,15 +114,7 @@ DEFAULT_PLANS: dict[str, dict[str, Any]] = {
         "price": 29.90,
         "price_text": "R$ 29.90",
         "duration_days": None,
-        "description": "Upsell 1 principal VIP Surebet",
-        "kind": "upsell_1",
-    },
-    "upsell_1_secondary": {
-        "label": "🎯 Upsell 1 Alternativo",
-        "price": 19.90,
-        "price_text": "R$ 19.90",
-        "duration_days": 30,
-        "description": "Upsell 1 alternativo VIP Surebet",
+        "description": "Oferta upsell 1 principal",
         "kind": "upsell_1",
     },
     "upsell_2_primary": {
@@ -126,15 +122,7 @@ DEFAULT_PLANS: dict[str, dict[str, Any]] = {
         "price": 39.90,
         "price_text": "R$ 39.90",
         "duration_days": None,
-        "description": "Upsell 2 principal VIP Surebet",
-        "kind": "upsell_2",
-    },
-    "upsell_2_secondary": {
-        "label": "💼 Upsell 2 Alternativo",
-        "price": 24.90,
-        "price_text": "R$ 24.90",
-        "duration_days": 30,
-        "description": "Upsell 2 alternativo VIP Surebet",
+        "description": "Oferta upsell 2 principal",
         "kind": "upsell_2",
     },
 }
@@ -151,111 +139,34 @@ SYNCPAY_REQUEST_TIMEOUT = float(os.environ.get("SYNCPAY_REQUEST_TIMEOUT", "30"))
 GRUPO_VIP_ID_RAW = os.environ.get("GRUPO_VIP_ID", "").strip()
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
 
-START_TEXT = """Olá! Sou o assistente do grupo de Surebet 👋
-
-Use os botões abaixo para escolher o que você quer aprender."""
-
-SUREBET_TEXT = """📘 O QUE É SUREBET?
-
-Surebet significa aposta segura. É quando você aposta em todos os resultados possíveis de um jogo em casas diferentes e garante lucro independente do resultado.
-
-Como isso é possível? As casas competem entre si e às vezes oferecem odds em desacordo. Quando a soma das probabilidades fica abaixo de 100%, você lucra.
-
-Exemplo:
-- Casa A: Time 1 vence → odd 2.10
-- Casa B: Time 2 vence → odd 2.10
-Apostando R$100 em cada lado → recebe R$210 em qualquer resultado → lucro de R$10 ✅
-
-Isso não é sorte. É matemática."""
-
-CALCULATION_TEXT = """🧮 COMO CALCULAR UMA SUREBET?
-
-Fórmula:
-(1 ÷ odd1) + (1 ÷ odd2) menor que 1 = SUREBET ✅
-
-Exemplo:
-- Casa A: odd 2.10 → 1 ÷ 2.10 = 0.476
-- Casa B: odd 2.10 → 1 ÷ 2.10 = 0.476
-- Soma: 0.952 ✅
-
-Como distribuir a banca:
-Stake A = (Banca ÷ odd A) ÷ soma total
-
-💡 Aqui no grupo as entradas já vêm com os valores calculados!"""
-
-ENTRY_USAGE_TEXT = """⚡ COMO USAR AS ENTRADAS DO GRUPO?
-
-1️⃣ Ative as notificações do grupo
-2️⃣ Ao receber a entrada, abra as casas indicadas
-3️⃣ Aposte o valor exato em cada casa
-4️⃣ Lucro garantido!
-
-⚠️ As odds mudam em minutos. Aja rápido e nunca aposte em apenas um lado."""
-
-BANKROLL_TEXT = """💰 GESTÃO DE BANCA
-
-Use entre 5% e 10% da banca por entrada.
-
-Exemplo:
-Banca: R$500 → Por entrada: R$25 a R$50
-
-Casas recomendadas:
-- Bet365
-- Betano
-- Sportingbet
-- Betfair
-
-💡 Tenha pelo menos 3 casas cadastradas."""
-
 DEFAULT_FUNNEL_TEXTS = {
-    "vip_funnel_text": """⬆️ VEJA COMO É O VIP POR DENTRO
-DIVIDIDO EM TÓPICOS PARA VOCÊ 🔴
-
-No VIP você recebe:
-
-✅ Entradas organizadas
-✅ Mais agilidade para executar
-✅ Acesso ao ambiente premium
-✅ Conteúdo direto ao ponto
-✅ Suporte mais próximo
-
-🚀 Acesso imediato
-⏱️ Condição promocional por tempo limitado
-
-Escolha uma opção abaixo para continuar 👇""",
-    "downsell_text": """20 segundos e essa condição pode sair do ar ✅
-
-Liberamos uma condição melhor para sua entrada no VIP.
-
-Se quiser aproveitar o menor valor disponível agora, escolha uma das opções abaixo 👇""",
-    "upsell_1_text": """🔼 ESPAÇO RESERVADO PARA UPSELL 1
-
-Preencha este bloco com a copy do seu primeiro upsell.
-
-Quando quiser ativar, basta ajustar os textos e preços abaixo 👇""",
-    "upsell_2_text": """🔼 ESPAÇO RESERVADO PARA UPSELL 2
-
-Preencha este bloco com a copy do seu segundo upsell.
-
-Quando quiser ativar, basta ajustar os textos e preços abaixo 👇""",
+    "vip_funnel_text": "Configure aqui o texto da oferta inicial no editor do funil.",
+    "downsell_text": "Configure aqui o texto do downsell no editor do funil.",
+    "upsell_1_text": "Configure aqui o texto do upsell 1 no editor do funil.",
+    "upsell_2_text": "Configure aqui o texto do upsell 2 no editor do funil.",
+}
+FUNNEL_VIDEO_KEYS = {
+    "vip_funnel_video": "Vídeo da oferta inicial",
+    "downsell_video": "Vídeo do downsell",
+    "upsell_1_video": "Vídeo do upsell 1",
+    "upsell_2_video": "Vídeo do upsell 2",
 }
 
-CALLBACK_SUREBET = "surebet_info"
-CALLBACK_CALC = "surebet_calc"
-CALLBACK_ENTRIES = "surebet_entries"
-CALLBACK_BANKROLL = "surebet_bankroll"
 CALLBACK_SUBSCRIBE = "vip_subscribe"
 CALLBACK_MENU = "back_to_menu"
-CALLBACK_DOWNSELL = "vip_downsell"
 CALLBACK_PLAN_PREFIX = "vip_plan:"
 CALLBACK_DOWNSELL_PLAN_PREFIX = "vip_downsell_plan:"
-CALLBACK_UPSELL_1 = "vip_upsell_1"
 CALLBACK_UPSELL_2 = "vip_upsell_2"
+CALLBACK_CREATE_CHARGE_PREFIX = "vip_create_charge:"
 CALLBACK_UPSELL_1_PLAN_PREFIX = "vip_upsell_1_plan:"
 CALLBACK_UPSELL_2_PLAN_PREFIX = "vip_upsell_2_plan:"
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.environ.get("TELEGRAM_TOKEN", "surebet-editor-secret"))
+app.secret_key = (
+    os.environ.get("FLASK_SECRET_KEY", "").strip()
+    or os.environ.get("TELEGRAM_TOKEN", "").strip()
+    or "funnel-editor-secret"
+)
 
 BOOTSTRAP_LOCK = threading.Lock()
 SERVICES_STARTED = False
@@ -310,21 +221,19 @@ def current_date() -> datetime.date:
     return datetime.now(APP_TIMEZONE).date()
 
 
-def main_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("📘 O que é Surebet?", callback_data=CALLBACK_SUREBET)],
-            [InlineKeyboardButton("🧮 Como calcular?", callback_data=CALLBACK_CALC)],
-            [InlineKeyboardButton("⚡ Como usar as entradas?", callback_data=CALLBACK_ENTRIES)],
-            [InlineKeyboardButton("💰 Qual banca usar?", callback_data=CALLBACK_BANKROLL)],
-            [InlineKeyboardButton("💳 Assinar VIP", callback_data=CALLBACK_SUBSCRIBE)],
-        ]
-    )
+def current_datetime() -> datetime:
+    return datetime.now(APP_TIMEZONE)
 
 
 def back_to_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)]]
+    )
+
+
+def start_funnel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("INICIAR", callback_data=CALLBACK_SUBSCRIBE)]]
     )
 
 
@@ -384,10 +293,35 @@ def current_funnel_text(key: str) -> str:
     return DEFAULT_FUNNEL_TEXTS[key]
 
 
+def current_funnel_videos() -> dict[str, str]:
+    config = load_funnel_config()
+    raw_videos = config.get("videos")
+    if not isinstance(raw_videos, dict):
+        return {}
+    videos: dict[str, str] = {}
+    for key in FUNNEL_VIDEO_KEYS:
+        value = raw_videos.get(key)
+        if isinstance(value, str) and value.strip():
+            videos[key] = value.strip()
+    return videos
+
+
+def funnel_video_path(video_key: str) -> Path | None:
+    configured = current_funnel_videos().get(video_key)
+    if configured:
+        candidate = FUNNEL_MEDIA_DIR / configured
+        if candidate.exists():
+            return candidate
+    if video_key == "vip_funnel_video" and FUNNEL_VIDEO_PATH.exists():
+        return FUNNEL_VIDEO_PATH
+    return None
+
+
 def build_funnel_editor_config() -> dict[str, Any]:
     return {
         "texts": {key: current_funnel_text(key) for key in DEFAULT_FUNNEL_TEXTS},
         "plans": current_plans(),
+        "videos": current_funnel_videos(),
     }
 
 
@@ -410,20 +344,20 @@ def downsell_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(plans["week_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "week_downsell")],
             [InlineKeyboardButton(plans["lifetime_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "lifetime_downsell")],
             [InlineKeyboardButton(plans["lifetime_secret_downsell"]["label"], callback_data=CALLBACK_DOWNSELL_PLAN_PREFIX + "lifetime_secret_downsell")],
-            [InlineKeyboardButton("🔼 Abrir Upsell 1", callback_data=CALLBACK_UPSELL_1)],
-            [InlineKeyboardButton("🔼 Abrir Upsell 2", callback_data=CALLBACK_UPSELL_2)],
             [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
         ]
     )
 
 
-def upsell_1_keyboard() -> InlineKeyboardMarkup:
+def upsell_1_keyboard(base_plan_code: str) -> InlineKeyboardMarkup:
     plans = current_plans()
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(plans["upsell_1_primary"]["label"] + " por " + plans["upsell_1_primary"]["price_text"], callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_primary")],
-            [InlineKeyboardButton(plans["upsell_1_secondary"]["label"] + " por " + plans["upsell_1_secondary"]["price_text"], callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_secondary")],
-            [InlineKeyboardButton("🔼 Ir para Upsell 2", callback_data=CALLBACK_UPSELL_2)],
+            [
+                InlineKeyboardButton("✅ ADICIONAR✅", callback_data=CALLBACK_UPSELL_1_PLAN_PREFIX + "upsell_1_primary"),
+                InlineKeyboardButton("❌ NÃO QUERO❌", callback_data=CALLBACK_CREATE_CHARGE_PREFIX + base_plan_code),
+            ],
             [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
         ]
     )
@@ -434,7 +368,10 @@ def upsell_2_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(plans["upsell_2_primary"]["label"] + " por " + plans["upsell_2_primary"]["price_text"], callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_primary")],
-            [InlineKeyboardButton(plans["upsell_2_secondary"]["label"] + " por " + plans["upsell_2_secondary"]["price_text"], callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_secondary")],
+            [
+                InlineKeyboardButton("✅ ADICIONAR✅", callback_data=CALLBACK_UPSELL_2_PLAN_PREFIX + "upsell_2_primary"),
+                InlineKeyboardButton("❌ NÃO QUERO❌", callback_data=CALLBACK_MENU),
+            ],
             [InlineKeyboardButton("🔙 Voltar ao menu", callback_data=CALLBACK_MENU)],
         ]
     )
@@ -478,6 +415,11 @@ def ensure_syncpay_charge_columns(connection: sqlite3.Connection) -> None:
     required_columns = {
         "plan_code": "TEXT",
         "amount": "REAL",
+        "base_plan_code": "TEXT",
+        "next_followup_at": "TEXT",
+        "last_downsell_at": "TEXT",
+        "upsell_2_sent_at": "TEXT",
+        "reminder_count": "INTEGER DEFAULT 0",
     }
     for column_name, column_type in required_columns.items():
         if column_name not in existing_columns:
@@ -633,6 +575,69 @@ def get_syncpay_charge(identifier: str) -> sqlite3.Row | None:
         ).fetchone()
 
 
+def replace_pending_syncpay_charges(user_id: int, keep_identifier: str) -> None:
+    with database_connection() as connection:
+        connection.execute(
+            """
+            UPDATE syncpay_cobrancas
+            SET status = 'replaced',
+                next_followup_at = NULL,
+                updated_at = ?
+            WHERE user_id = ?
+              AND identifier != ?
+              AND status = 'pending'
+            """,
+            (current_datetime().isoformat(), user_id, keep_identifier),
+        )
+
+
+def get_due_syncpay_followups(reference_time: datetime) -> list[sqlite3.Row]:
+    with database_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM syncpay_cobrancas
+            WHERE status = 'pending'
+              AND next_followup_at IS NOT NULL
+              AND next_followup_at != ''
+              AND next_followup_at <= ?
+            ORDER BY next_followup_at ASC
+            """,
+            (reference_time.isoformat(),),
+        ).fetchall()
+    return list(rows)
+
+
+def update_syncpay_followup_state(
+    identifier: str,
+    *,
+    next_followup_at: datetime | None,
+    last_downsell_at: datetime | None = None,
+    upsell_2_sent_at: datetime | None = None,
+    reminder_count: int | None = None,
+) -> None:
+    with database_connection() as connection:
+        connection.execute(
+            """
+            UPDATE syncpay_cobrancas
+            SET next_followup_at = ?,
+                last_downsell_at = COALESCE(?, last_downsell_at),
+                upsell_2_sent_at = COALESCE(?, upsell_2_sent_at),
+                reminder_count = COALESCE(?, reminder_count),
+                updated_at = ?
+            WHERE identifier = ?
+            """,
+            (
+                next_followup_at.isoformat() if next_followup_at is not None else None,
+                last_downsell_at.isoformat() if last_downsell_at is not None else None,
+                upsell_2_sent_at.isoformat() if upsell_2_sent_at is not None else None,
+                reminder_count,
+                current_datetime().isoformat(),
+                identifier,
+            ),
+        )
+
+
 def save_syncpay_charge(
     identifier: str,
     user_id: int,
@@ -640,45 +645,89 @@ def save_syncpay_charge(
     pix_code: str,
     plan_code: str,
     amount: float,
+    *,
+    base_plan_code: str | None = None,
 ) -> None:
-    timestamp = datetime.now(APP_TIMEZONE).isoformat()
+    now = current_datetime()
+    timestamp = now.isoformat()
+    next_followup_at = (
+        now + INITIAL_FOLLOWUP_DELAY
+        if status == "pending"
+        else None
+    )
     with database_connection() as connection:
         connection.execute(
             """
-            INSERT INTO syncpay_cobrancas (identifier, user_id, status, pix_code, plan_code, amount, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO syncpay_cobrancas (
+                identifier,
+                user_id,
+                status,
+                pix_code,
+                plan_code,
+                amount,
+                base_plan_code,
+                next_followup_at,
+                last_downsell_at,
+                upsell_2_sent_at,
+                reminder_count,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
             ON CONFLICT(identifier) DO UPDATE SET
                 user_id = excluded.user_id,
                 status = excluded.status,
                 pix_code = excluded.pix_code,
                 plan_code = excluded.plan_code,
                 amount = excluded.amount,
+                base_plan_code = excluded.base_plan_code,
+                next_followup_at = excluded.next_followup_at,
+                last_downsell_at = NULL,
+                upsell_2_sent_at = NULL,
+                reminder_count = 0,
                 updated_at = excluded.updated_at
             """,
-            (identifier, user_id, status, pix_code, plan_code, amount, timestamp, timestamp),
+            (
+                identifier,
+                user_id,
+                status,
+                pix_code,
+                plan_code,
+                amount,
+                base_plan_code,
+                next_followup_at.isoformat() if next_followup_at is not None else None,
+                timestamp,
+                timestamp,
+            ),
         )
 
 
 def update_syncpay_charge_status(identifier: str, status: str, pix_code: str | None = None) -> None:
-    timestamp = datetime.now(APP_TIMEZONE).isoformat()
+    timestamp = current_datetime().isoformat()
     with database_connection() as connection:
+        clear_followup = status != "pending"
         if pix_code is None:
             connection.execute(
                 """
                 UPDATE syncpay_cobrancas
-                SET status = ?, updated_at = ?
+                SET status = ?,
+                    next_followup_at = CASE WHEN ? THEN NULL ELSE next_followup_at END,
+                    updated_at = ?
                 WHERE identifier = ?
                 """,
-                (status, timestamp, identifier),
+                (status, clear_followup, timestamp, identifier),
             )
         else:
             connection.execute(
                 """
                 UPDATE syncpay_cobrancas
-                SET status = ?, pix_code = ?, updated_at = ?
+                SET status = ?,
+                    pix_code = ?,
+                    next_followup_at = CASE WHEN ? THEN NULL ELSE next_followup_at END,
+                    updated_at = ?
                 WHERE identifier = ?
                 """,
-                (status, pix_code, timestamp, identifier),
+                (status, pix_code, clear_followup, timestamp, identifier),
             )
 
 
@@ -880,6 +929,8 @@ def create_syncpay_charge(
     user_id: int,
     nome: str,
     plan_code: str,
+    *,
+    base_plan_code: str | None = None,
 ) -> str:
     webhook_url = notification_webhook_url()
     if not webhook_url:
@@ -909,7 +960,16 @@ def create_syncpay_charge(
 
     save_pending_assinante(user_id, nome)
     save_payment_profile(user_id, nome, cpf, email, telefone)
-    save_syncpay_charge(identifier, user_id, "pending", pix_code, plan_code, float(plan["price"]))
+    save_syncpay_charge(
+        identifier,
+        user_id,
+        "pending",
+        pix_code,
+        plan_code,
+        float(plan["price"]),
+        base_plan_code=base_plan_code,
+    )
+    replace_pending_syncpay_charges(user_id, identifier)
 
     duration_days = plan.get("duration_days")
     duration_text = (
@@ -986,6 +1046,32 @@ async def send_private_message(user_id: int, text: str) -> None:
     if TELEGRAM_APP is None:
         raise RuntimeError("Bot do Telegram não inicializado.")
     await TELEGRAM_APP.bot.send_message(chat_id=user_id, text=text)
+
+
+async def send_funnel_stage_message(
+    user_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup,
+    *,
+    video_key: str | None = None,
+) -> None:
+    if TELEGRAM_APP is None:
+        raise RuntimeError("Bot do Telegram não inicializado.")
+    video_path = funnel_video_path(video_key) if video_key else None
+    if video_path is not None:
+        with video_path.open("rb") as video_file:
+            await TELEGRAM_APP.bot.send_video(
+                chat_id=user_id,
+                video=video_file,
+                caption=text,
+                reply_markup=reply_markup,
+            )
+        return
+    await TELEGRAM_APP.bot.send_message(
+        chat_id=user_id,
+        text=text,
+        reply_markup=reply_markup,
+    )
 
 
 async def remove_user_from_group(user_id: int) -> None:
@@ -1088,6 +1174,55 @@ def process_completed_payment(identifier: str, payload_data: dict[str, Any] | No
     logger.info("Pagamento SyncPay %s aprovado para user_id=%s.", identifier, user_id)
 
 
+def process_pending_followups() -> None:
+    due_charges = get_due_syncpay_followups(current_datetime())
+    if not due_charges:
+        return
+
+    for charge in due_charges:
+        identifier = str(charge["identifier"])
+        latest_charge = get_syncpay_charge(identifier)
+        if latest_charge is None or str(latest_charge["status"] or "").strip().lower() != "pending":
+            continue
+
+        user_id = int(latest_charge["user_id"])
+        now = current_datetime()
+        reminder_count = int(latest_charge["reminder_count"] or 0)
+        first_downsell = not str(latest_charge["last_downsell_at"] or "").strip()
+
+        try:
+            run_telegram_coroutine(
+                send_funnel_stage_message(
+                    user_id,
+                    current_funnel_text("downsell_text"),
+                    downsell_keyboard(),
+                    video_key="downsell_video",
+                )
+            )
+            upsell_2_sent_at = None
+            if first_downsell:
+                run_telegram_coroutine(
+                    send_funnel_stage_message(
+                        user_id,
+                        current_funnel_text("upsell_2_text"),
+                        upsell_2_keyboard(),
+                        video_key="upsell_2_video",
+                    )
+                )
+                upsell_2_sent_at = now
+        except Exception as exc:
+            logger.warning("Falha ao enviar follow-up da cobrança %s: %s", identifier, exc)
+            continue
+
+        update_syncpay_followup_state(
+            identifier,
+            next_followup_at=now + REPEATED_DOWNSELL_DELAY,
+            last_downsell_at=now,
+            upsell_2_sent_at=upsell_2_sent_at,
+            reminder_count=reminder_count + 1,
+        )
+
+
 def expire_due_subscribers() -> None:
     due_today = get_assinantes_expiring_on(current_date().isoformat())
     if not due_today:
@@ -1138,31 +1273,23 @@ async def safe_answer_callback(query: Any, text: str | None = None) -> None:
         logger.warning("Falha ao responder callback query: %s", exc)
 
 
-async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat = update.effective_chat
-    message = update.effective_message
-    if chat is None or message is None:
-        return
-
-    menu_message_id = context.user_data.get("menu_message_id")
-    if menu_message_id:
-        try:
-            await context.bot.edit_message_text(
-                chat_id=chat.id,
-                message_id=menu_message_id,
-                text=START_TEXT,
-                reply_markup=main_menu_keyboard(),
-            )
-            return
-        except TelegramError:
-            context.user_data.pop("menu_message_id", None)
-
-    menu_message = await message.reply_text(START_TEXT, reply_markup=main_menu_keyboard())
-    context.user_data["menu_message_id"] = menu_message.message_id
-
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await show_main_menu(update, context)
+    message = update.effective_message
+    if message is None:
+        return
+    await message.reply_text(FUNNEL_START_TEXT, reply_markup=start_funnel_keyboard())
+
+
+async def show_start_menu(update: Update) -> None:
+    query = update.callback_query
+    if query is None:
+        return
+    await safe_answer_callback(query)
+    try:
+        await query.edit_message_text(FUNNEL_START_TEXT, reply_markup=start_funnel_keyboard())
+    except TelegramError:
+        if query.message:
+            await query.message.reply_text(FUNNEL_START_TEXT, reply_markup=start_funnel_keyboard())
 
 
 async def show_subscription_offer(
@@ -1224,8 +1351,9 @@ async def show_subscription_offer(
             return
         await safe_answer_callback(query)
 
-    if FUNNEL_VIDEO_PATH.exists():
-        with FUNNEL_VIDEO_PATH.open("rb") as video_file:
+    initial_video = funnel_video_path("vip_funnel_video")
+    if initial_video is not None:
+        with initial_video.open("rb") as video_file:
             await message.reply_video(
                 video=video_file,
                 caption=current_funnel_text("vip_funnel_text"),
@@ -1243,6 +1371,8 @@ async def create_charge_for_plan(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     plan_code: str,
+    *,
+    base_plan_code: str | None = None,
 ) -> None:
     user = update.effective_user
     message = update.effective_message
@@ -1268,6 +1398,7 @@ async def create_charge_for_plan(
             user.id,
             user.full_name,
             plan_code,
+            base_plan_code=base_plan_code,
         )
     except Exception as exc:
         logger.exception("Falha ao gerar cobrança PIX na SyncPay: %s", exc)
@@ -1283,11 +1414,26 @@ async def create_charge_for_plan(
     )
 
 
-async def show_offer_stage(update: Update, text: str, reply_markup: InlineKeyboardMarkup) -> None:
+async def show_offer_stage(
+    update: Update,
+    text: str,
+    reply_markup: InlineKeyboardMarkup,
+    *,
+    video_key: str | None = None,
+) -> None:
     query = update.callback_query
     if query is None:
         return
     await safe_answer_callback(query)
+    video_path = funnel_video_path(video_key) if video_key else None
+    if video_path is not None and query.message:
+        with video_path.open("rb") as video_file:
+            await query.message.reply_video(
+                video=video_file,
+                caption=text,
+                reply_markup=reply_markup,
+            )
+        return
     try:
         await query.edit_message_text(text, reply_markup=reply_markup)
     except TelegramError:
@@ -1326,31 +1472,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     data = query.data
     if data == CALLBACK_MENU:
-        await safe_answer_callback(query)
-        try:
-            if query.message:
-                context.user_data["menu_message_id"] = query.message.message_id
-            await query.edit_message_text(START_TEXT, reply_markup=main_menu_keyboard())
-        except TelegramError:
-            if query.message:
-                context.user_data.pop("menu_message_id", None)
-            await show_main_menu(update, context)
-        return
-
-    if data == CALLBACK_SUREBET:
-        await present_callback_text(update, SUREBET_TEXT)
-        return
-
-    if data == CALLBACK_CALC:
-        await present_callback_text(update, CALCULATION_TEXT)
-        return
-
-    if data == CALLBACK_ENTRIES:
-        await present_callback_text(update, ENTRY_USAGE_TEXT)
-        return
-
-    if data == CALLBACK_BANKROLL:
-        await present_callback_text(update, BANKROLL_TEXT)
+        await show_start_menu(update)
         return
 
     if data == CALLBACK_SUBSCRIBE:
@@ -1358,24 +1480,23 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data.startswith(CALLBACK_PLAN_PREFIX):
+        base_plan_code = data[len(CALLBACK_PLAN_PREFIX):]
         await show_offer_stage(
             update,
-            current_funnel_text("downsell_text"),
-            downsell_keyboard(),
+            current_funnel_text("upsell_1_text"),
+            upsell_1_keyboard(base_plan_code),
+            video_key="upsell_1_video",
         )
+        return
+
+    if data.startswith(CALLBACK_CREATE_CHARGE_PREFIX):
+        plan_code = data[len(CALLBACK_CREATE_CHARGE_PREFIX):]
+        await create_charge_for_plan(update, context, plan_code, base_plan_code=plan_code)
         return
 
     if data.startswith(CALLBACK_DOWNSELL_PLAN_PREFIX):
         plan_code = data[len(CALLBACK_DOWNSELL_PLAN_PREFIX):]
-        await create_charge_for_plan(update, context, plan_code)
-        return
-
-    if data == CALLBACK_UPSELL_1:
-        await show_offer_stage(
-            update,
-            current_funnel_text("upsell_1_text"),
-            upsell_1_keyboard(),
-        )
+        await create_charge_for_plan(update, context, plan_code, base_plan_code=plan_code)
         return
 
     if data == CALLBACK_UPSELL_2:
@@ -1383,6 +1504,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             update,
             current_funnel_text("upsell_2_text"),
             upsell_2_keyboard(),
+            video_key="upsell_2_video",
         )
         return
 
@@ -1482,9 +1604,17 @@ def start_scheduler() -> None:
         id="expire_due_subscribers",
         replace_existing=True,
     )
+    scheduler.add_job(
+        process_pending_followups,
+        trigger="interval",
+        minutes=1,
+        id="process_pending_followups",
+        replace_existing=True,
+        max_instances=1,
+    )
     scheduler.start()
     SCHEDULER = scheduler
-    logger.info("APScheduler iniciado para expirações diárias às 09:00.")
+    logger.info("APScheduler iniciado para expirações diárias e follow-ups de pagamento.")
 
 
 def ensure_services_started() -> None:
@@ -1517,7 +1647,7 @@ def bootstrap_services() -> None:
 
 @app.get("/")
 def index() -> tuple[dict[str, str], int]:
-    return {"service": "surebet-telegram-bot", "status": "ok"}, 200
+    return {"service": "funnel-bot", "status": "ok"}, 200
 
 
 @app.get("/health")
@@ -1598,11 +1728,24 @@ FUNNEL_EDITOR_TEMPLATE = """
         <div class="notice">Funil salvo com sucesso.</div>
       {% endif %}
       <div class="grid">
-        <form class="card" method="post" action="{{ url_for('funnel_editor_save') }}">
+        <form class="card" method="post" action="{{ url_for('funnel_editor_save') }}" enctype="multipart/form-data">
           <h2>Textos</h2>
           {% for text_key, text_value in texts.items() %}
             <label>{{ text_labels[text_key] }}</label>
             <textarea name="text__{{ text_key }}" data-preview-text="{{ text_key }}">{{ text_value }}</textarea>
+          {% endfor %}
+
+          <h2>Vídeos</h2>
+          {% for video_key, video_label in video_labels.items() %}
+            <div class="plan">
+              <h3>{{ video_label }}</h3>
+              <div class="muted">
+                Atual: {{ videos.get(video_key, 'nenhum arquivo enviado') }}
+              </div>
+              <label>Enviar novo vídeo</label>
+              <input type="file" name="video__{{ video_key }}" accept="video/*">
+              <label><input type="checkbox" name="clear_video__{{ video_key }}" value="1"> Remover vídeo atual</label>
+            </div>
           {% endfor %}
 
           <h2>Planos</h2>
@@ -1645,6 +1788,7 @@ FUNNEL_EDITOR_TEMPLATE = """
           <h2>Preview</h2>
           <div class="preview-stage">
             <h3>Oferta inicial</h3>
+            <div class="muted">Vídeo: {{ videos.get("vip_funnel_video", "padrão/nenhum") }}</div>
             <div class="preview-text" id="preview_vip_funnel_text">{{ texts["vip_funnel_text"] }}</div>
             <div class="preview-buttons">
               <span id="preview_plan_week_offer">{{ plans["week_offer"]["label"] }} por {{ plans["week_offer"]["price_text"] }}</span>
@@ -1654,6 +1798,7 @@ FUNNEL_EDITOR_TEMPLATE = """
           </div>
           <div class="preview-stage">
             <h3>Downsell</h3>
+            <div class="muted">Vídeo: {{ videos.get("downsell_video", "nenhum") }}</div>
             <div class="preview-text" id="preview_downsell_text">{{ texts["downsell_text"] }}</div>
             <div class="preview-buttons">
               <span id="preview_plan_week_downsell">{{ plans["week_downsell"]["label"] }}</span>
@@ -1663,18 +1808,22 @@ FUNNEL_EDITOR_TEMPLATE = """
           </div>
           <div class="preview-stage">
             <h3>Upsell 1</h3>
+            <div class="muted">Vídeo: {{ videos.get("upsell_1_video", "nenhum") }}</div>
             <div class="preview-text" id="preview_upsell_1_text">{{ texts["upsell_1_text"] }}</div>
             <div class="preview-buttons">
               <span id="preview_plan_upsell_1_primary">{{ plans["upsell_1_primary"]["label"] }} por {{ plans["upsell_1_primary"]["price_text"] }}</span>
-              <span id="preview_plan_upsell_1_secondary">{{ plans["upsell_1_secondary"]["label"] }} por {{ plans["upsell_1_secondary"]["price_text"] }}</span>
+              <span>✅ ADICIONAR✅</span>
+              <span>❌ NÃO QUERO❌</span>
             </div>
           </div>
           <div class="preview-stage">
             <h3>Upsell 2</h3>
+            <div class="muted">Vídeo: {{ videos.get("upsell_2_video", "nenhum") }}</div>
             <div class="preview-text" id="preview_upsell_2_text">{{ texts["upsell_2_text"] }}</div>
             <div class="preview-buttons">
               <span id="preview_plan_upsell_2_primary">{{ plans["upsell_2_primary"]["label"] }} por {{ plans["upsell_2_primary"]["price_text"] }}</span>
-              <span id="preview_plan_upsell_2_secondary">{{ plans["upsell_2_secondary"]["label"] }} por {{ plans["upsell_2_secondary"]["price_text"] }}</span>
+              <span>✅ ADICIONAR✅</span>
+              <span>❌ NÃO QUERO❌</span>
             </div>
           </div>
         </div>
@@ -1721,12 +1870,14 @@ def funnel_editor() -> str:
         saved=request.args.get("saved") == "1",
         texts=config["texts"],
         plans=config["plans"],
+        videos=config["videos"],
         text_labels={
             "vip_funnel_text": "Texto da oferta inicial",
             "downsell_text": "Texto do downsell",
             "upsell_1_text": "Texto do upsell 1",
             "upsell_2_text": "Texto do upsell 2",
         },
+        video_labels=FUNNEL_VIDEO_KEYS,
     )
 
 
@@ -1753,6 +1904,7 @@ def funnel_editor_save() -> Any:
     config = {
         "texts": {},
         "plans": {},
+        "videos": current_funnel_videos(),
     }
     for text_key in DEFAULT_FUNNEL_TEXTS:
         config["texts"][text_key] = request.form.get(f"text__{text_key}", DEFAULT_FUNNEL_TEXTS[text_key])
@@ -1777,6 +1929,32 @@ def funnel_editor_save() -> Any:
             else:
                 saved_plan[field_name] = str(raw_value)
         config["plans"][plan_code] = saved_plan
+
+    FUNNEL_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    for video_key in FUNNEL_VIDEO_KEYS:
+        if request.form.get(f"clear_video__{video_key}") == "1":
+            existing_name = config["videos"].pop(video_key, None)
+            if existing_name:
+                existing_path = FUNNEL_MEDIA_DIR / existing_name
+                if existing_path.exists():
+                    existing_path.unlink()
+
+        uploaded = request.files.get(f"video__{video_key}")
+        if not uploaded or not uploaded.filename:
+            continue
+
+        suffix = Path(uploaded.filename).suffix.lower() or ".mp4"
+        filename = f"{video_key}{suffix}"
+        target = FUNNEL_MEDIA_DIR / filename
+
+        existing_name = config["videos"].get(video_key)
+        if existing_name and existing_name != filename:
+            existing_path = FUNNEL_MEDIA_DIR / existing_name
+            if existing_path.exists():
+                existing_path.unlink()
+
+        uploaded.save(target)
+        config["videos"][video_key] = filename
 
     save_funnel_config(config)
     return redirect(url_for("funnel_editor", saved=1))
