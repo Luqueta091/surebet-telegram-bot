@@ -1294,9 +1294,12 @@ async def send_funnel_stage_message(
             await TELEGRAM_APP.bot.send_video(
                 chat_id=user_id,
                 video=video_file,
-                caption=text,
-                reply_markup=reply_markup,
             )
+        await TELEGRAM_APP.bot.send_message(
+            chat_id=user_id,
+            text=text,
+            reply_markup=reply_markup,
+        )
         return
     await TELEGRAM_APP.bot.send_message(
         chat_id=user_id,
@@ -1585,11 +1588,11 @@ async def show_subscription_offer(
     initial_video = funnel_video_path("vip_funnel_video")
     if initial_video is not None:
         with initial_video.open("rb") as video_file:
-            await message.reply_video(
-                video=video_file,
-                caption=current_funnel_text("vip_funnel_text"),
-                reply_markup=initial_offer_keyboard(),
-            )
+            await message.reply_video(video=video_file)
+        await message.reply_text(
+            current_funnel_text("vip_funnel_text"),
+            reply_markup=initial_offer_keyboard(),
+        )
         return
 
     await message.reply_text(
@@ -1659,11 +1662,8 @@ async def show_offer_stage(
     video_path = funnel_video_path(video_key) if video_key else None
     if video_path is not None and query.message:
         with video_path.open("rb") as video_file:
-            await query.message.reply_video(
-                video=video_file,
-                caption=text,
-                reply_markup=reply_markup,
-            )
+            await query.message.reply_video(video=video_file)
+        await query.message.reply_text(text, reply_markup=reply_markup)
         return
     try:
         await query.edit_message_text(text, reply_markup=reply_markup)
