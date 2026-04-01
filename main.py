@@ -276,16 +276,28 @@ EMBEDDED_FUNNEL_CONFIG: dict[str, Any] = {'texts': {'vip_funnel_text': '⬆️ V
                             '💎VIР ЕМ РRОМОÇÃО💎\r\n'
                             '\r\n'
                             '👇 Сlіquе аbаіхо раrа реgаr а рrоmоçãо 👇',
-           'upsell_1_text': '🔼 ESPAÇO RESERVADO PARA UPSELL 1\r\n'
-                            '\r\n'
-                            'Preencha este bloco com a copy do seu primeiro upsell.\r\n'
-                            '\r\n'
-                            'Quando quiser ativar, basta ajustar os textos e preços abaixo 👇',
-           'upsell_2_text': '🔼 ESPAÇO RESERVADO PARA UPSELL 2\r\n'
-                            '\r\n'
-                            'Preencha este bloco com a copy do seu segundo upsell.\r\n'
-                            '\r\n'
-                            'Quando quiser ativar, basta ajustar os textos e preços abaixo 👇'},
+           'upsell_1_text': '🔞LIVES BANIDAS🔥   \r\n'
+                            '😈Não perca ao acesso das Lives mais exclusivas do Brasil! 🇧🇷   \r\n'
+                            '📁SEAPARADAS POR PASTAS, TUDO ORGANIZADO!\r\n'
+                            '📁  💎CONTEÚDOS ATUALIZADOS DIARIAMENTE.. 2026    \r\n'
+                            '🔥APENAS HOJE→ ACESSO VIP PERMANENTE por apenas  \r\n'
+                            'R$4,99 no PIX 🔥  \r\n'
+                            '👇🏻CLIQUE NO BOTÃO ABAIXO E GARANTA JÁ SEU VIP🔞',
+           'upsell_2_text': '☎️Ligação Perdida    🔞 𝐒𝐔𝐀 𝐆0𝐙4𝐃4 𝐆𝐀𝐑𝐀𝐍𝐓𝐈𝐃𝐀 𝐎𝐔 𝐒𝐄𝐔 𝐃𝐈𝐍𝐇𝐄𝐈𝐑𝐎 𝐃𝐄 𝐕𝐎𝐋𝐓𝐀 '
+                            '❤️\u200d🔥  \r\n'
+                            '🔥 𝙎𝙚𝙥𝙖𝙧𝙖𝙙𝙤𝙨 𝙥𝙤𝙧 𝙘𝙖𝙩𝙚𝙜𝙤𝙧𝙞𝙖:   \r\n'
+                            '📁𝗩𝗮𝘇𝗮𝗱¡𝗻𝗵𝗼𝘀 𝗱𝗲 𝗡𝗼𝘃¡𝗻𝗵𝗮𝘀 𝗱𝗼 𝗧𝗶𝗸𝗧𝗼𝗸 𝗲 𝗜𝗻𝘀𝘁𝗮𝗴𝗿𝗮𝗺  \r\n'
+                            '🔞 𝐍𝐨𝐯𝐢𝐧𝐡𝐚𝐬⁺¹⁸ 𝐜𝐡𝐨𝐫𝐚𝐧𝐝𝐨 𝐧𝐚 𝐫𝐨𝐥𝐚 \r\n'
+                            '🩸𝐍𝐨𝐯𝐢𝐧𝐡𝐚⁺¹⁸ 𝐩𝐞𝐫𝐝𝐞𝐧𝐝𝐨 𝐨 𝐜𝐚𝐛𝟒𝐜𝟎 \r\n'
+                            '🔞 𝐈𝐧𝐜𝟑𝐬𝐭𝐨⁺¹⁸ 𝐒𝐞𝐜𝐫𝟑𝐭𝟎 𝐫𝐞𝐚𝐥 \r\n'
+                            '👙 𝐏𝟒𝐢 𝐜𝐨𝐦𝟑𝐧𝐝𝐨 𝐟𝟏𝐥𝐡𝐚⁺¹⁸  \r\n'
+                            '🔞 𝐎𝐜𝐮𝐥𝐭𝐨𝐬 𝐛𝐫𝐮𝐭𝐚𝐥 \r\n'
+                            '🔞 𝐕𝐚𝐳𝟒𝐝𝟎𝐬 𝐒𝟑𝐜𝐫𝐞𝐭𝟎𝐬⁺¹⁸ \r\n'
+                            '😈𝐕𝐢́𝐝𝐞𝐨𝐬 𝐛𝐚𝐧𝐢𝐝𝐨𝐬 𝐞𝐦 𝟕 𝐩𝐚𝐢́𝐬𝐞𝐬 \r\n'
+                            '🎁 𝐂𝐨𝐦𝐩𝐫𝐞 𝐮𝐦 𝐩𝐥𝐚𝐧𝐨 𝐡𝐨𝐣𝐞 𝐞 𝐠𝐚𝐧𝐡𝐞 5 𝐠𝐫𝐮𝐩𝐨𝐬 𝐒𝐄𝐂𝐑𝟑𝐓𝟎𝐒 \r\n'
+                            '🔐🔥  🚀 𝐀𝐜𝐞𝐬𝐬𝐨 𝐢𝐦𝐞𝐝𝐢𝐚𝐭𝐨 🔒 𝐂𝐨𝐦𝐩𝐫𝐚 𝟏𝟎𝟎% 𝐚𝐧ô𝐧𝐢𝐦𝐚 ♾️ 𝐕𝐢𝐭𝐚𝐥í𝐜𝐢𝐨 𝐫𝐞𝐚𝐥 💬 '
+                            '𝐒𝐮𝐩𝐨𝐫𝐭𝐞 𝟐𝟒𝐡 𝐧𝐨 𝐓𝐞𝐥𝐞𝐠𝐫𝐚𝐦 🗓 𝐏𝐫𝐨𝐦𝐨çã𝐨 𝐞𝐧𝐜𝐞𝐫𝐫𝐚 𝐞𝐦 𝟓 𝐌𝐈𝐍𝐔𝐓𝐎𝐒!  ⌛️ 5 𝗩𝗔𝗚𝗔𝗦 '
+                            '𝗖𝗢𝗠 𝗗𝗘𝗦𝗖𝗢𝗡𝗧𝗢 DE 4,65 𝗣𝗢𝗥 𝗧𝗘𝗠𝗣𝗢 𝗟𝗜𝗠𝗜𝗧𝗔𝗗𝗢 ⬇️'},
  'plans': {'week_offer': {'label': '⭐ 1 Semana 30% OFF ⭐',
                           'price': 6.02,
                           'price_text': 'R$ 6.02',
@@ -323,28 +335,13 @@ EMBEDDED_FUNNEL_CONFIG: dict[str, Any] = {'texts': {'vip_funnel_text': '⬆️ V
                                         'description': 'Assinatura vitalícia VIP   + materiais '
                                                        'extras - downsell',
                                         'kind': 'downsell'},
-           'upsell_1_primary': {'label': '🔞LIVES BANIDAS🔥   😈Não perca ao acesso das Lives mais '
-                                         'exclusivas do Brasil! 🇧🇷   📁SEAPARADAS POR PASTAS, TUDO '
-                                         'ORGANIZADO!📁  💎CONTEÚDOS ATUALIZADOS DIARIAMENTE.. '
-                                         '2026    🔥APENAS HOJE→ ACESSO VIP PERMANENTE por apenas  '
-                                         'R$4,99 no PIX 🔥  👇🏻CLIQUE NO BOTÃO ABAIXO E GARANTA JÁ '
-                                         'SEU VIP🔞',
+           'upsell_1_primary': {'label': '',
                                 'price': 4.99,
                                 'price_text': '',
                                 'duration_days': None,
                                 'description': 'Upsell 1 principal VIP',
                                 'kind': 'upsell_1'},
-           'upsell_2_primary': {'label': '☎️Ligação Perdida    🔞 𝐒𝐔𝐀 𝐆0𝐙4𝐃4 𝐆𝐀𝐑𝐀𝐍𝐓𝐈𝐃𝐀 𝐎𝐔 𝐒𝐄𝐔 '
-                                         '𝐃𝐈𝐍𝐇𝐄𝐈𝐑𝐎 𝐃𝐄 𝐕𝐎𝐋𝐓𝐀 ❤️\u200d🔥  🔥 𝙎𝙚𝙥𝙖𝙧𝙖𝙙𝙤𝙨 𝙥𝙤𝙧 '
-                                         '𝙘𝙖𝙩𝙚𝙜𝙤𝙧𝙞𝙖:   📁𝗩𝗮𝘇𝗮𝗱¡𝗻𝗵𝗼𝘀 𝗱𝗲 𝗡𝗼𝘃¡𝗻𝗵𝗮𝘀 𝗱𝗼 𝗧𝗶𝗸𝗧𝗼𝗸 𝗲 '
-                                         '𝗜𝗻𝘀𝘁𝗮𝗴𝗿𝗮𝗺  🔞 𝐍𝐨𝐯𝐢𝐧𝐡𝐚𝐬⁺¹⁸ 𝐜𝐡𝐨𝐫𝐚𝐧𝐝𝐨 𝐧𝐚 𝐫𝐨𝐥𝐚 🩸𝐍𝐨𝐯𝐢𝐧𝐡𝐚⁺¹⁸ '
-                                         '𝐩𝐞𝐫𝐝𝐞𝐧𝐝𝐨 𝐨 𝐜𝐚𝐛𝟒𝐜𝟎 🔞 𝐈𝐧𝐜𝟑𝐬𝐭𝐨⁺¹⁸ 𝐒𝐞𝐜𝐫𝟑𝐭𝟎 𝐫𝐞𝐚𝐥 👙 𝐏𝟒𝐢 '
-                                         '𝐜𝐨𝐦𝟑𝐧𝐝𝐨 𝐟𝟏𝐥𝐡𝐚⁺¹⁸  🔞 𝐎𝐜𝐮𝐥𝐭𝐨𝐬 𝐛𝐫𝐮𝐭𝐚𝐥 🔞 𝐕𝐚𝐳𝟒𝐝𝟎𝐬 𝐒𝟑𝐜𝐫𝐞𝐭𝟎𝐬⁺¹⁸ '
-                                         '😈𝐕𝐢́𝐝𝐞𝐨𝐬 𝐛𝐚𝐧𝐢𝐝𝐨𝐬 𝐞𝐦 𝟕 𝐩𝐚𝐢́𝐬𝐞𝐬 🎁 𝐂𝐨𝐦𝐩𝐫𝐞 𝐮𝐦 𝐩𝐥𝐚𝐧𝐨 𝐡𝐨𝐣𝐞 𝐞 '
-                                         '𝐠𝐚𝐧𝐡𝐞 5 𝐠𝐫𝐮𝐩𝐨𝐬 𝐒𝐄𝐂𝐑𝟑𝐓𝟎𝐒 🔐🔥  🚀 𝐀𝐜𝐞𝐬𝐬𝐨 𝐢𝐦𝐞𝐝𝐢𝐚𝐭𝐨 🔒 𝐂𝐨𝐦𝐩𝐫𝐚 '
-                                         '𝟏𝟎𝟎% 𝐚𝐧ô𝐧𝐢𝐦𝐚 ♾️ 𝐕𝐢𝐭𝐚𝐥í𝐜𝐢𝐨 𝐫𝐞𝐚𝐥 💬 𝐒𝐮𝐩𝐨𝐫𝐭𝐞 𝟐𝟒𝐡 𝐧𝐨 𝐓𝐞𝐥𝐞𝐠𝐫𝐚𝐦 '
-                                         '🗓 𝐏𝐫𝐨𝐦𝐨çã𝐨 𝐞𝐧𝐜𝐞𝐫𝐫𝐚 𝐞𝐦 𝟓 𝐌𝐈𝐍𝐔𝐓𝐎𝐒!  ⌛️ 5 𝗩𝗔𝗚𝗔𝗦 𝗖𝗢𝗠 '
-                                         '𝗗𝗘𝗦𝗖𝗢𝗡𝗧𝗢 DE 4,65 𝗣𝗢𝗥 𝗧𝗘𝗠𝗣𝗢 𝗟𝗜𝗠𝗜𝗧𝗔𝗗𝗢 ⬇️',
+           'upsell_2_primary': {'label': '',
                                 'price': 39.9,
                                 'price_text': '',
                                 'duration_days': None,
@@ -1156,6 +1153,55 @@ def fetch_syncpay_transaction(identifier: str) -> dict[str, Any]:
     return data
 
 
+def syncpay_first_value(source: dict[str, Any] | None, *keys: str) -> str:
+    if not isinstance(source, dict):
+        return ""
+    for key in keys:
+        value = source.get(key)
+        if value is None:
+            continue
+        normalized = str(value).strip()
+        if normalized:
+            return normalized
+    return ""
+
+
+def extract_syncpay_pix_code(source: dict[str, Any] | None) -> str:
+    return syncpay_first_value(
+        source,
+        "pix_code",
+        "paymentCode",
+        "paymentcode",
+        "pixCode",
+    )
+
+
+def extract_syncpay_transaction_id(source: dict[str, Any] | None) -> str:
+    return syncpay_first_value(
+        source,
+        "identifier",
+        "idTransaction",
+        "idtransaction",
+        "id",
+        "reference_id",
+        "externalreference",
+    )
+
+
+def extract_syncpay_status(source: dict[str, Any] | None) -> str:
+    raw_status = syncpay_first_value(
+        source,
+        "status",
+        "status_transaction",
+        "statusTransaction",
+    ).lower()
+    if raw_status in {"paid", "approved", "complete", "completed"}:
+        return "completed"
+    if raw_status in {"pending", "waiting_payment", "waiting", "created"}:
+        return "pending"
+    return raw_status
+
+
 def create_syncpay_charge(
     user_id: int,
     nome: str,
@@ -1183,8 +1229,9 @@ def create_syncpay_charge(
     }
 
     response = syncpay_request("POST", "/api/partner/v1/cash-in", json=payload)
-    pix_code = str(response.get("pix_code") or "").strip()
-    identifier = str(response.get("identifier") or "").strip()
+    response_data = response.get("data") if isinstance(response.get("data"), dict) else response
+    pix_code = extract_syncpay_pix_code(response_data) or extract_syncpay_pix_code(response)
+    identifier = extract_syncpay_transaction_id(response_data) or extract_syncpay_transaction_id(response)
 
     if not pix_code or not identifier:
         raise RuntimeError(f"Não foi possível gerar o PIX na SyncPay: {response}")
@@ -1224,15 +1271,11 @@ def create_syncpay_charge(
 def extract_syncpay_identifier(payload: dict[str, Any]) -> str:
     data = payload.get("data")
     if isinstance(data, dict):
-        value = (
-            data.get("id")
-            or data.get("identifier")
-            or data.get("reference_id")
-        )
+        value = extract_syncpay_transaction_id(data)
         if value:
-            return str(value).strip()
+            return value
     return (
-        str(payload.get("identifier") or "").strip()
+        extract_syncpay_transaction_id(payload)
         or str(request.args.get("identifier") or "").strip()
         or str(request.args.get("id") or "").strip()
     )
@@ -1333,13 +1376,13 @@ def process_completed_payment(identifier: str, payload_data: dict[str, Any] | No
         return
 
     data = payload_data or {}
-    status = str(data.get("status") or "").strip().lower()
-    pix_code = str(data.get("pix_code") or "").strip() or str(charge["pix_code"] or "").strip()
+    status = extract_syncpay_status(data)
+    pix_code = extract_syncpay_pix_code(data) or str(charge["pix_code"] or "").strip()
 
     if not status:
         transaction = fetch_syncpay_transaction(identifier)
-        status = str(transaction.get("status") or "").strip().lower()
-        pix_code = str(transaction.get("pix_code") or "").strip() or pix_code
+        status = extract_syncpay_status(transaction)
+        pix_code = extract_syncpay_pix_code(transaction) or pix_code
 
     update_syncpay_charge_status(identifier, status or "pending", pix_code or None)
 
