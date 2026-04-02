@@ -619,6 +619,33 @@ def get_plan(plan_code: str) -> dict[str, Any]:
     return plan
 
 
+def plan_kind(plan_code: str | None) -> str:
+    if not plan_code:
+        return ""
+    try:
+        return str(get_plan(plan_code).get("kind") or "").strip()
+    except KeyError:
+        return ""
+
+
+def normalize_charge_selection(
+    plan_code: str,
+    base_plan_code: str | None = None,
+) -> tuple[str, str | None]:
+    selected_kind = plan_kind(plan_code)
+    base_kind = plan_kind(base_plan_code)
+
+    if selected_kind in {"initial", "downsell"}:
+        return plan_code, None
+
+    if selected_kind.startswith("upsell_"):
+        if base_kind in {"initial", "downsell"}:
+            return plan_code, base_plan_code
+        return plan_code, None
+
+    return plan_code, None
+
+
 def database_connection() -> sqlite3.Connection:
     connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
@@ -1226,7 +1253,10 @@ def extract_syncpay_status(source: dict[str, Any] | None) -> str:
 
 def parse_plan_and_base(raw_value: str) -> tuple[str, str | None]:
     plan_code, separator, base_plan_code = raw_value.partition("|")
-    return plan_code, (base_plan_code or None) if separator else None
+    return normalize_charge_selection(
+        plan_code,
+        (base_plan_code or None) if separator else None,
+    )
 
 
 def create_syncpay_charge(
@@ -1239,6 +1269,7 @@ def create_syncpay_charge(
     webhook_url = notification_webhook_url()
     if not webhook_url:
         raise RuntimeError("WEBHOOK_URL não configurado.")
+    plan_code, base_plan_code = normalize_charge_selection(plan_code, base_plan_code)
     plan = get_plan(plan_code)
     base_plan = get_plan(base_plan_code) if base_plan_code else None
     total_amount = float(plan["price"]) + (float(base_plan["price"]) if base_plan is not None else 0.0)
@@ -1665,6 +1696,8 @@ async def create_charge_for_plan(
     if user is None or message is None:
         return
 
+    plan_code, base_plan_code = normalize_charge_selection(plan_code, base_plan_code)
+
     try:
         plan = get_plan(plan_code)
     except KeyError:
@@ -1770,12 +1803,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data.startswith(CALLBACK_CREATE_CHARGE_PREFIX):
         plan_code = data[len(CALLBACK_CREATE_CHARGE_PREFIX):]
-        await create_charge_for_plan(update, context, plan_code, base_plan_code=plan_code)
+        await create_charge_for_plan(update, context, plan_code)
         return
 
     if data.startswith(CALLBACK_DOWNSELL_PLAN_PREFIX):
         plan_code = data[len(CALLBACK_DOWNSELL_PLAN_PREFIX):]
-        await create_charge_for_plan(update, context, plan_code, base_plan_code=plan_code)
+        await create_charge_for_plan(update, context, plan_code)
         return
 
     if data == CALLBACK_UPSELL_2:
